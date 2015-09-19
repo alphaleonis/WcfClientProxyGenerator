@@ -1,1 +1,1 @@
-# EventSourceGenerator
+# WcfClientProxyGenerator
