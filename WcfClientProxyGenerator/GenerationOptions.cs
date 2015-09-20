@@ -38,6 +38,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
       public INamedTypeSymbol SourceInterfaceType { get; set; }
 
-      public bool SuppressAsyncMethods { get; set; }      
+      public bool SuppressAsyncMethods { get; set; }
+
+      public bool Wrapper { get; set; }
    }
 }

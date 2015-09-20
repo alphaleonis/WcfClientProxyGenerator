@@ -19,7 +19,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {
-      public ClassDeclarationSyntax GenerateProxyClass(INamedTypeSymbol sourceProxyInterface, string name = null, Accessibility accessibility = Accessibility.Public)
+      public ClassDeclarationSyntax GenerateProxyClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceProxyInterface, string name = null, Accessibility accessibility = Accessibility.Public)
       {
          if (name == null)
          {
@@ -30,7 +30,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          }
 
          // Resolve the callback contract if any
-         ITypeSymbol serviceContractAttributeType = RequireTypeSymbol("System.ServiceModel.ServiceContractAttribute");
+         ITypeSymbol serviceContractAttributeType = RequireTypeSymbol(context, "System.ServiceModel.ServiceContractAttribute");
          AttributeData serviceContractAttribute = sourceProxyInterface.GetAttributes().FirstOrDefault(attr => attr.AttributeClass.Equals(serviceContractAttributeType));
          if (serviceContractAttribute == null)
             throw new TextFileGeneratorException(sourceProxyInterface, $"The interface {sourceProxyInterface.Name} is not decorated with ServiceContractAttribute.");
@@ -46,56 +46,56 @@ namespace Alphaleonis.WcfClientProxyGenerator
          INamedTypeSymbol baseType;
          if (callbackContractType != null)
          {
-            baseType = RequireTypeSymbol("System.ServiceModel.DuplexClientBase`1").Construct(sourceProxyInterface);
+            baseType = RequireTypeSymbol(context, "System.ServiceModel.DuplexClientBase`1").Construct(sourceProxyInterface);
          }
          else
          {
-            baseType = RequireTypeSymbol("System.ServiceModel.ClientBase`1").Construct(sourceProxyInterface);
+            baseType = RequireTypeSymbol(context, "System.ServiceModel.ClientBase`1").Construct(sourceProxyInterface);
          }
 
          // Create class declaration
-         SyntaxNode targetClass = Context.Generator.ClassDeclaration(name, accessibility: accessibility, baseType: Context.Generator.TypeExpression(baseType), interfaceTypes: new[] { Context.Generator.TypeExpression(sourceProxyInterface) });
+         SyntaxNode targetClass = context.Generator.ClassDeclaration(name, accessibility: accessibility, baseType: context.Generator.TypeExpression(baseType), interfaceTypes: new[] { context.Generator.TypeExpression(sourceProxyInterface) });
 
          // Copy constructors from base class.
          foreach (var baseCtor in baseType.Constructors.Where(ctor => ctor.DeclaredAccessibility != Accessibility.Private))
          {
-            var targetCtor = Context.Generator.ConstructorDeclaration(baseCtor, baseCtor.Parameters.Select(p => Context.Generator.Argument(Context.Generator.IdentifierName(p.Name))));
-            targetCtor = Context.Generator.WithAccessibility(targetCtor, Accessibility.Public);
-            targetClass = Context.Generator.AddMembers(targetClass, targetCtor).AddNewLineTrivia().AddNewLineTrivia();
+            var targetCtor = context.Generator.ConstructorDeclaration(baseCtor, baseCtor.Parameters.Select(p => context.Generator.Argument(context.Generator.IdentifierName(p.Name))));
+            targetCtor = context.Generator.WithAccessibility(targetCtor, Accessibility.Public);
+            targetClass = context.Generator.AddMembers(targetClass, targetCtor).AddNewLineTrivia().AddNewLineTrivia();
          }
 
-         foreach (IMethodSymbol sourceMethod in GetOperationContractMethods(sourceProxyInterface))
+         foreach (IMethodSymbol sourceMethod in GetOperationContractMethods(context, sourceProxyInterface))
          {
-            SyntaxNode targetMethod = Context.Generator.MethodDeclaration(sourceMethod);
-            targetMethod = Context.Generator.WithModifiers(targetMethod, DeclarationModifiers.None);
+            SyntaxNode targetMethod = context.Generator.MethodDeclaration(sourceMethod);
+            targetMethod = context.Generator.WithModifiers(targetMethod, DeclarationModifiers.None);
 
-            bool isVoid = sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(VoidTaskType);
+            bool isVoid = sourceMethod.ReturnType.SpecialType == SpecialType.System_Void;
             targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
 
-            var expression = Context.Generator.InvocationExpression(
-               Context.Generator.MemberAccessExpression(
-                  Context.Generator.MemberAccessExpression(
-                     Context.Generator.BaseExpression(),
+            var expression = context.Generator.InvocationExpression(
+               context.Generator.MemberAccessExpression(
+                  context.Generator.MemberAccessExpression(
+                     context.Generator.BaseExpression(),
                      "Channel"
                   ),
                   sourceMethod.Name
                ),
-               sourceMethod.Parameters.Select(p => Context.Generator.IdentifierName(p.Name)).ToArray()
+               sourceMethod.Parameters.Select(p => context.Generator.IdentifierName(p.Name)).ToArray()
             );
 
             SyntaxNode statement;
             if (!isVoid)
-               statement = Context.Generator.ReturnStatement(expression);
+               statement = context.Generator.ReturnStatement(expression);
             else
-               statement = Context.Generator.ExpressionStatement(expression);
+               statement = context.Generator.ExpressionStatement(expression);
 
-            targetMethod = Context.Generator.WithStatements(targetMethod,
+            targetMethod = context.Generator.WithStatements(targetMethod,
                new[]
                {
                   statement
                }
             );
-            targetClass = Context.Generator.AddMembers(targetClass, targetMethod);
+            targetClass = context.Generator.AddMembers(targetClass, targetMethod);
          }
 
          return (ClassDeclarationSyntax)targetClass;

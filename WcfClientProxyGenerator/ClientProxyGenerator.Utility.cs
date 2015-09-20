@@ -20,16 +20,16 @@ namespace Alphaleonis.WcfClientProxyGenerator
    {
       #region Utility Methods
 
-      private ImmutableList<MethodDeclarationSyntax> GetWcfClientProxyInterfaceMethods(INamedTypeSymbol serviceInterface, bool includeAttributes, bool includeSourceInterfaceMethods, bool excludeAsyncMethods)
+      private ImmutableList<MethodDeclarationSyntax> GetWcfClientProxyInterfaceMethods(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol serviceInterface, bool includeAttributes, bool includeSourceInterfaceMethods, bool excludeAsyncMethods)
       {
          ImmutableList<MethodDeclarationSyntax> methods = ImmutableList<MethodDeclarationSyntax>.Empty;
-         var genericTaskType = RequireTypeSymbol(typeof(Task<>));
-         var voidTaskType = VoidTaskType;
+         var genericTaskType = GetGenericTaskType(context);            
+         var voidTaskType = GetVoidTaskType(context);
 
          foreach (IMethodSymbol sourceMethod in serviceInterface.GetAllMembers().OfType<IMethodSymbol>())
          {
-            AttributeData operationAttribute = sourceMethod.GetAttributes().Where(attr => attr.AttributeClass.Equals(OperationContractAttributeType)).FirstOrDefault();
-            var nonOperationAttributes = sourceMethod.GetAttributes().Where(attr => !attr.AttributeClass.Equals(OperationContractAttributeType));
+            AttributeData operationAttribute = sourceMethod.GetAttributes().Where(attr => attr.AttributeClass.Equals(GetOperationContractAttributeType(context))).FirstOrDefault();
+            var nonOperationAttributes = sourceMethod.GetAttributes().Where(attr => !attr.AttributeClass.Equals(GetOperationContractAttributeType(context)));
             if (operationAttribute != null)
             {
                bool sourceIsAsync = false;
@@ -52,7 +52,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
                   if (returnType.Equals(voidTaskType))
                   {
-                     returnType = Context.Compilation.GetSpecialType(SpecialType.System_Void);
+                     returnType = context.Compilation.GetSpecialType(SpecialType.System_Void);
                   }
                   else
                   {
@@ -60,7 +60,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                      if (namedReturnType == null)
                         throw new TextFileGeneratorException(sourceMethod, $"Unexpected return type (not a named type) in async method. Expected System.Threading.Tasks.Task.");
 
-                     if (IsGenericTaskType(namedReturnType))
+                     if (IsGenericTaskType(context, namedReturnType))
                      {
                         returnType = namedReturnType.TypeArguments[0];
                      }
@@ -74,22 +74,22 @@ namespace Alphaleonis.WcfClientProxyGenerator
                // Create Non-async version of method.
                if (includeSourceInterfaceMethods || sourceIsAsync)
                {
-                  SyntaxNode targetMethod = Context.Generator.MethodDeclaration(sourceMethod);
-                  targetMethod = Context.Generator.WithType(targetMethod, Context.Generator.TypeExpression(returnType));
-                  targetMethod = Context.Generator.WithName(targetMethod, methodName);
+                  SyntaxNode targetMethod = context.Generator.MethodDeclaration(sourceMethod);
+                  targetMethod = context.Generator.WithType(targetMethod, context.Generator.TypeExpression(returnType));
+                  targetMethod = context.Generator.WithName(targetMethod, methodName);
                   if (includeAttributes)
                   {
-                     targetMethod = Context.Generator.AddAttributes(targetMethod, nonOperationAttributes.Select(a => Context.Generator.Attribute(a)));
+                     targetMethod = context.Generator.AddAttributes(targetMethod, nonOperationAttributes.Select(a => context.Generator.Attribute(a)));
                      if (sourceIsAsync)
                      {
-                        targetMethod = Context.Generator.AddAttributes(targetMethod,
-                           Context.Generator.Attribute(
-                              Context.Generator.TypeExpression(OperationContractAttributeType),
-                           operationAttribute.NamedArguments.Where(arg => arg.Key != "AsyncPattern").Select(arg => Context.Generator.AttributeArgument(arg.Key, Context.Generator.TypedConstantExpression(arg.Value)))));
+                        targetMethod = context.Generator.AddAttributes(targetMethod,
+                           context.Generator.Attribute(
+                              context.Generator.TypeExpression(GetOperationContractAttributeType(context)),
+                           operationAttribute.NamedArguments.Where(arg => arg.Key != "AsyncPattern").Select(arg => context.Generator.AttributeArgument(arg.Key, context.Generator.TypedConstantExpression(arg.Value)))));
                      }
                      else
                      {
-                        targetMethod = Context.Generator.AddAttributes(targetMethod, Context.Generator.Attribute(operationAttribute));
+                        targetMethod = context.Generator.AddAttributes(targetMethod, context.Generator.Attribute(operationAttribute));
                      }
                   }
                   targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
@@ -98,25 +98,25 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
                if (!excludeAsyncMethods && (includeSourceInterfaceMethods || !sourceIsAsync))
                {
-                  SyntaxNode targetMethod = Context.Generator.MethodDeclaration(sourceMethod);
-                  targetMethod = Context.Generator.WithType(targetMethod,
-                     Context.Generator.TypeExpression(returnType.SpecialType == SpecialType.System_Void ? voidTaskType : genericTaskType.Construct(returnType)));
-                  targetMethod = Context.Generator.WithName(targetMethod, methodName + "Async");
+                  SyntaxNode targetMethod = context.Generator.MethodDeclaration(sourceMethod);
+                  targetMethod = context.Generator.WithType(targetMethod,
+                     context.Generator.TypeExpression(returnType.SpecialType == SpecialType.System_Void ? voidTaskType : genericTaskType.Construct(returnType)));
+                  targetMethod = context.Generator.WithName(targetMethod, methodName + "Async");
                   if (includeAttributes)
                   {
-                     targetMethod = Context.Generator.AddAttributes(targetMethod, nonOperationAttributes.Select(a => Context.Generator.Attribute(a)));
+                     targetMethod = context.Generator.AddAttributes(targetMethod, nonOperationAttributes.Select(a => context.Generator.Attribute(a)));
                      if (sourceIsAsync)
                      {
-                        targetMethod = Context.Generator.AddAttributes(targetMethod, Context.Generator.Attribute(operationAttribute));
+                        targetMethod = context.Generator.AddAttributes(targetMethod, context.Generator.Attribute(operationAttribute));
                      }
                      else
                      {
-                        targetMethod = Context.Generator.AddAttributes(targetMethod,
-                           Context.Generator.Attribute(Context.Generator.TypeExpression(OperationContractAttributeType),
+                        targetMethod = context.Generator.AddAttributes(targetMethod,
+                           context.Generator.Attribute(context.Generator.TypeExpression(GetOperationContractAttributeType(context)),
                            operationAttribute.NamedArguments
                               .Where(arg => arg.Key != "AsyncPattern")
-                              .Select(arg => Context.Generator.AttributeArgument(arg.Key, Context.Generator.TypedConstantExpression(arg.Value)))
-                              .Concat(new[] { Context.Generator.AttributeArgument("AsyncPattern", Context.Generator.TrueLiteralExpression()) })));
+                              .Select(arg => context.Generator.AttributeArgument(arg.Key, context.Generator.TypedConstantExpression(arg.Value)))
+                              .Concat(new[] { context.Generator.AttributeArgument("AsyncPattern", context.Generator.TrueLiteralExpression()) })));
                      }
                   }
                   targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
@@ -127,92 +127,91 @@ namespace Alphaleonis.WcfClientProxyGenerator
          return methods;
       }
 
-      private INamedTypeSymbol VoidTaskType
+      private INamedTypeSymbol GetVoidTaskType(CSharpRoslynCodeGenerationContext context)
       {
-         get
-         {
-            return RequireTypeSymbol<Task>();
-         }
+         return RequireTypeSymbol<Task>(context);
       }
 
-      private INamedTypeSymbol GenericTaskType
+      private INamedTypeSymbol GetGenericTaskType(CSharpRoslynCodeGenerationContext context)
       {
-         get
-
-         {
-            return RequireTypeSymbol(typeof(Task<>));
-         }
+         return RequireTypeSymbol(context, typeof(Task<>));
       }      
 
-      private bool IsGenericTaskType(INamedTypeSymbol namedReturnType)
+      private bool IsGenericTaskType(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol namedReturnType)
       {
-         return namedReturnType.IsGenericType && namedReturnType.ConstructUnboundGenericType().Equals(RequireTypeSymbol(typeof(Task<>)).ConstructUnboundGenericType());
+         return namedReturnType.IsGenericType && namedReturnType.ConstructUnboundGenericType().Equals(RequireTypeSymbol(context, typeof(Task<>)).ConstructUnboundGenericType());
       }
 
-      private INamedTypeSymbol RequireTypeSymbol<T>()
+      private INamedTypeSymbol RequireTypeSymbol<T>(CSharpRoslynCodeGenerationContext context)
       {
-         return RequireTypeSymbol(typeof(T));
+         return RequireTypeSymbol(context, typeof(T));
       }
 
-      private INamedTypeSymbol RequireTypeSymbol(Type type)
+      private INamedTypeSymbol RequireTypeSymbol(CSharpRoslynCodeGenerationContext context, Type type)
       {
-         INamedTypeSymbol symbol = Context.Compilation.GetTypeByMetadataName(type.FullName);
+         INamedTypeSymbol symbol = context.Compilation.GetTypeByMetadataName(type.FullName);
          if (symbol == null)
             throw new TextFileGeneratorException($"Unable to find the required type {type.AssemblyQualifiedName} in this context. Are you missing an assembly reference?");
 
          return symbol;
       }
 
-      private INamedTypeSymbol RequireTypeSymbol(string fullyQualifiedTypeName)
+      private INamedTypeSymbol RequireTypeSymbol(CSharpRoslynCodeGenerationContext context, string fullyQualifiedTypeName)
       {
-         INamedTypeSymbol symbol = Context.Compilation.GetTypeByMetadataName(fullyQualifiedTypeName);
+         INamedTypeSymbol symbol = context.Compilation.GetTypeByMetadataName(fullyQualifiedTypeName);
          if (symbol == null)
             throw new TextFileGeneratorException($"Unable to find the required type {fullyQualifiedTypeName} in this context. Are you missing an assembly reference?");
 
          return symbol;
       }
 
-      private T AddGeneratedCodeAttribute<T>(T node) where T : SyntaxNode
+      private T AddGeneratedCodeAttribute<T>(SyntaxGenerator g, T node) where T : SyntaxNode
       {
-         return (T)Context.Generator.AddAttributes(node,
-            Context.Generator.Attribute("System.CodeDom.Compiler.GeneratedCodeAttribute",
-               Context.Generator.LiteralExpression(Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyTitleAttribute>().Title),
-               Context.Generator.LiteralExpression(Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyFileVersionAttribute>().Version)
+         return (T)g.AddAttributes(node,
+            g.Attribute("System.CodeDom.Compiler.GeneratedCodeAttribute",
+               g.LiteralExpression(GetCodeGeneratorName()),
+               g.LiteralExpression(Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyFileVersionAttribute>().Version)
             )
          );
       }
 
-      private IEnumerable<IMethodSymbol> GetOperationContractMethods(INamedTypeSymbol proxyInterface)
+      private static string GetCodeGeneratorName()
       {
-         return proxyInterface.GetAllMembers().OfType<IMethodSymbol>().Where(member => member.GetAttributes().Any(attr => attr.AttributeClass.Equals(OperationContractAttributeType)));
+         return Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyTitleAttribute>().Title;
       }
 
-      private bool ReturnsTask(IMethodSymbol sourceMethod)
+      private IEnumerable<IMethodSymbol> GetOperationContractMethods(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol proxyInterface)
       {
-         return sourceMethod.ReturnType.Equals(VoidTaskType) || IsGenericTaskType(((INamedTypeSymbol)sourceMethod.ReturnType));
+         return proxyInterface.GetAllMembers().OfType<IMethodSymbol>().Where(member => member.GetAttributes().Any(attr => attr.AttributeClass.Equals(GetOperationContractAttributeType(context))));
       }
 
-      private bool IsVoid(IMethodSymbol sourceMethod)
+      private bool ReturnsTask(CSharpRoslynCodeGenerationContext context, IMethodSymbol sourceMethod)
       {
-         return sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(VoidTaskType);
+         return sourceMethod.ReturnType.Equals(GetVoidTaskType(context)) || IsGenericTaskType(context, ((INamedTypeSymbol)sourceMethod.ReturnType));
       }
-      private SyntaxNode AwaitExpressionIfAsync(bool isAsync, SyntaxNode expression, bool configureAwait = false)
+
+      private bool IsVoid(CSharpRoslynCodeGenerationContext context, IMethodSymbol sourceMethod)
+      {
+         return sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(GetVoidTaskType(context));
+      }
+
+      private SyntaxNode AwaitExpressionIfAsync(SyntaxGenerator g, bool isAsync, SyntaxNode expression, bool configureAwait = false)
       {
          if (isAsync)
-            return AwaitExpression(expression, configureAwait);
+            return AwaitExpression(g, expression, configureAwait);
          else
             return expression;
       }
 
-      private SyntaxNode AwaitExpression(SyntaxNode expression, bool configureAwait = false)
+      private SyntaxNode AwaitExpression(SyntaxGenerator g, SyntaxNode expression, bool configureAwait = false)
       {
-         return Context.Generator.AwaitExpression(
-            Context.Generator.InvocationExpression(
-               Context.Generator.MemberAccessExpression(
+         return g.AwaitExpression(
+            g.InvocationExpression(
+               g.MemberAccessExpression(
                   expression,
                   "ConfigureAwait"
                ),
-               Context.Generator.LiteralExpression(configureAwait)
+               g.LiteralExpression(configureAwait)
             )
          );
       }
