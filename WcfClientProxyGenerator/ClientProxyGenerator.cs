@@ -16,62 +16,15 @@ using System.Threading;
 using System.Runtime.InteropServices;
 
 // TODO: Add Warning Comments about code being generated.
+// TODO: Attribute should reuqire the type or type-name as the first argument! Can we find a type that is not referenced? If not, add a method to search for it!
 namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {
       private const string GenerateWcfClientAttributeName = "GenerateWcfClientAttribute";
 
-      #region Constructor
-
-      //public ClientProxyGenerator(CSharpRoslynCodeGenerationContext context)
-      //{
-      //   if (context == null)
-      //      throw new ArgumentNullException(nameof(context), $"{nameof(context)} is null.");
-
-      //   Context = context;
-      //}
-
-      #endregion
-
-      //[GeneratedCode("", "")]
-      //private static CSharpRoslynCodeGenerationContext RemoveGeneratedPartsOfMemberDeclaration(CSharpRoslynCodeGenerationContext context, Func<CompilationUnitSyntax, IEnumerable<MemberDeclarationSyntax>> memberLookup)
-      //{
-      //   while (true)
-      //   {
-      //      var memberSymbol = memberLookup(context.CompilationUnit)
-      //         .Select(m => context.SemanticModel.GetDeclaredSymbol(m))
-      //         .Where(m => m.GetAttributes()
-      //            .Any(attr => attr.AttributeClass.GetFullName().Equals("System.CodeDom.Compiler.GeneratedCodeAttribute")
-      //                      && attr.ConstructorArguments.Length > 0
-      //                      && String.Equals(attr.ConstructorArguments[0].Value, GetCodeGeneratorName())
-      //            )
-      //         ).FirstOrDefault();
-
-      //      if (memberSymbol != null)
-      //      {
-      //         var syntax = memberSymbol.DeclaringSyntaxReferences.Select(r => r.GetSyntax())
-      //            .OfType<TypeDeclarationSyntax>()
-      //            .FirstOrDefault(s => s != null && s.AttributeLists.SelectMany(attr => attr.Attributes).Select(a =>
-      //            {
-      //               return context.Document.Project.GetDocument(a.SyntaxTree).GetSemanticModelAsync().Result.GetTypeInfo(a);
-      //            }).Any(a => a.Type != null && a.Type.GetFullName().Equals("System.CodeDom.Compiler.GeneratedCodeAttribute")));
-
-      //         Document document = context.Document.Project.GetDocument(syntax.SyntaxTree);
-
-      //         context = context.WithDocument(document.WithSyntaxRoot(syntax.SyntaxTree.GetCompilationUnitRoot().RemoveNode(syntax, SyntaxRemoveOptions.KeepNoTrivia)).Project.GetDocument(context.Document.Id));
-      //      }
-      //      else
-      //      {
-      //         break;
-      //      }
-      //   }
-      //   return context;
-      //}
-
       private static CSharpRoslynCodeGenerationContext AddType(CSharpRoslynCodeGenerationContext context, CompilationUnitSyntax newCu)
       {
-         //var newCu = SyntaxFactory.CompilationUnit(context.CompilationUnit.Externs, context.CompilationUnit.Usings, SyntaxFactory.List<AttributeListSyntax>(), SyntaxFactory.List<MemberDeclarationSyntax>(new[] { member }));
          return context.WithDocument(context.Document.Project.AddDocument(Guid.NewGuid().ToString() + ".g.cs", newCu).Project.GetDocument(context.Document.Id));
       }
 
@@ -90,7 +43,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
             {
                GenerationOptions options = new GenerationOptions(generationAttribute);
                INamedTypeSymbol serviceInterfaceSymbol;
-               serviceInterfaceSymbol = ResolveServiceInterface(context, sourceClassSymbol, options);
+               serviceInterfaceSymbol = ResolveServiceInterface(context.Compilation, sourceClassSymbol, options);
 
                if (!sourceClass.IsPartial())
                {
@@ -122,7 +75,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
       private static IReadOnlyList<MemberDeclarationSyntax> GenerateProxyInterfaces(CSharpRoslynCodeGenerationContext context, ClientProxyGenerator generator)
       {
          var sourceInterfaces = context.CompilationUnit.TopLevelInterfaces();
-
+         
          ImmutableList<MemberDeclarationSyntax> members = ImmutableList<MemberDeclarationSyntax>.Empty;
 
          foreach (var sourceInterface in sourceInterfaces)
@@ -135,7 +88,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                GenerationOptions options = new GenerationOptions(generationAttribute);
 
                INamedTypeSymbol serviceInterfaceSymbol;
-               serviceInterfaceSymbol = ResolveServiceInterface(context, sourceInterfaceSymbol, options);
+               serviceInterfaceSymbol = ResolveServiceInterface(context.Compilation, sourceInterfaceSymbol, options);
 
                if (!sourceInterface.IsPartial())
                {
@@ -144,7 +97,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
                bool implementsSourceInterface = sourceInterfaceSymbol.AllInterfaces.Any(i => i.Equals(serviceInterfaceSymbol));
 
-               InterfaceDeclarationSyntax targetInterface = generator.GenerateProxyInterface(context, serviceInterfaceSymbol, sourceInterfaceSymbol.Name, sourceInterfaceSymbol.DeclaredAccessibility, implementsSourceInterface, options.SuppressAsyncMethods);
+               InterfaceDeclarationSyntax targetInterface = generator.GenerateProxyInterface(context.SemanticModel, context.Generator, serviceInterfaceSymbol, sourceInterfaceSymbol.Name, sourceInterfaceSymbol.DeclaredAccessibility, implementsSourceInterface, options.SuppressAsyncMethods);
 
                targetInterface = context.Generator.AddModifiers(targetInterface, DeclarationModifiers.Partial);
 
@@ -162,7 +115,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          return members;
       }
 
-      private static INamedTypeSymbol ResolveServiceInterface(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceInterfaceSymbol, GenerationOptions options)
+      private static INamedTypeSymbol ResolveServiceInterface(Compilation compilation, INamedTypeSymbol sourceInterfaceSymbol, GenerationOptions options)
       {
          INamedTypeSymbol serviceInterfaceSymbol;
          if (options.SourceInterfaceType != null)
@@ -171,7 +124,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          }
          else if (!String.IsNullOrEmpty(options.SourceInterfaceTypeName))
          {
-            serviceInterfaceSymbol = context.GetTypeByMetadataName(options.SourceInterfaceTypeName);
+            serviceInterfaceSymbol = compilation.GetTypeByMetadataName(options.SourceInterfaceTypeName);
 
             if (serviceInterfaceSymbol == null)
                throw new TextFileGeneratorException(sourceInterfaceSymbol, $"Unable to locate the source interface \"{options.SourceInterfaceTypeName}\" specified.");

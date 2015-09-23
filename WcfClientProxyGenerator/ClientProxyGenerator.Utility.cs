@@ -13,6 +13,7 @@ using System.Reflection;
 using AlphaVSX.Roslyn;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Threading;
+using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Alphaleonis.WcfClientProxyGenerator
 {
@@ -20,112 +21,207 @@ namespace Alphaleonis.WcfClientProxyGenerator
    {
       #region Utility Methods
 
-      private ImmutableList<MethodDeclarationSyntax> GetWcfClientProxyInterfaceMethods(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol serviceInterface, bool includeAttributes, bool includeSourceInterfaceMethods, bool excludeAsyncMethods)
+      private class OperationContractMethodInfo
+      {
+         public OperationContractMethodInfo(SemanticModel semanticModel, IMethodSymbol method)
+         {
+            var taskType = semanticModel.Compilation.RequireTypeByMetadataName(typeof(Task).FullName);
+            var genericTaskType = semanticModel.Compilation.RequireTypeByMetadataName(typeof(Task<>).FullName);
+            var operationContractAttributeType = semanticModel.Compilation.RequireTypeByMetadataName("System.ServiceModel.OperationContractAttribute");
+
+            var operationContractAttribute = method.GetAttribute(operationContractAttributeType);
+            if (operationContractAttribute == null)
+               throw new InvalidOperationException($"The method {method.Name} is not decorated with {operationContractAttributeType.GetFullName()}.");
+
+            OperationContractAttribute = new ModifiedOperationContractAttributeData(operationContractAttribute);
+
+            AdditionalAttributes = method.GetAttributes().Where(attr => attr.AttributeClass.Equals(operationContractAttributeType) == false).ToImmutableArray();
+
+            IsAsync = method.ReturnType.Equals(taskType) || method.ReturnType.OriginalDefinition.Equals(genericTaskType.OriginalDefinition);
+
+            ContractReturnsVoid = method.ReturnsVoid || method.ReturnType.Equals(taskType);
+
+            Method = method;
+
+            if (IsAsync && method.Name.EndsWith("Async"))
+               ContractMethodName = method.Name.Substring(0, method.Name.Length - "Async".Length);
+            else
+               ContractMethodName = method.Name;
+
+            if (IsAsync)
+            {
+               if (ContractReturnsVoid)
+                  ContractReturnType = semanticModel.Compilation.GetSpecialType(SpecialType.System_Void);
+               else
+                  ContractReturnType = ((INamedTypeSymbol)method.ReturnType).TypeArguments.Single();               
+            }
+            else
+            {
+               ContractReturnType = ReturnType;
+            }
+
+            AsyncReturnType = ContractReturnsVoid ? taskType : genericTaskType.Construct(ContractReturnType);
+         }
+
+         #region Properties
+
+         public string MethodName { get { return Method.Name; } }
+
+         public string ContractMethodName { get; }
+
+         public bool ContractReturnsVoid { get; }
+
+         public ITypeSymbol AsyncReturnType { get; }
+
+         public ITypeSymbol ReturnType { get { return Method.ReturnType; } }
+
+         public ITypeSymbol ContractReturnType { get; }
+
+         public bool IsAsync { get; }
+         
+         public AttributeData OperationContractAttribute { get; }
+
+         public ImmutableArray<AttributeData> AdditionalAttributes { get; }
+
+         public ImmutableArray<IParameterSymbol> Parameters { get { return Method.Parameters; } }
+
+         public IEnumerable<AttributeData> AllAttributes
+         {
+            get
+            {
+               return AdditionalAttributes.Concat(new[] { OperationContractAttribute });                              
+            }
+         }
+
+         public IMethodSymbol Method { get; }
+
+         #endregion
+
+         #region Methods
+
+         public bool ContractMacthes(OperationContractMethodInfo other)
+         {
+            return ContractMethodName.Equals(other.ContractMethodName) &&
+               ContractReturnType.Equals(other.ContractReturnType) &&
+               Parameters.Select(p => p.Type).SequenceEqual(other.Parameters.Select(p => p.Type));
+         }
+
+         #endregion
+
+         private class ModifiedOperationContractAttributeData : AttributeData
+         {
+            private readonly AttributeData m_source;
+
+            public ModifiedOperationContractAttributeData(AttributeData source)
+            {
+               m_source = source;
+            }
+
+            protected override SyntaxReference CommonApplicationSyntaxReference
+            {
+               get
+               {
+                  return m_source.ApplicationSyntaxReference;
+               }
+            }
+
+            protected override INamedTypeSymbol CommonAttributeClass
+            {
+               get
+               {
+                  return m_source.AttributeClass;
+               }
+            }
+
+            protected override IMethodSymbol CommonAttributeConstructor
+            {
+               get
+               {
+                  return m_source.AttributeConstructor;
+               }
+            }
+
+            protected override ImmutableArray<TypedConstant> CommonConstructorArguments
+            {
+               get
+               {
+                  return m_source.ConstructorArguments;
+               }
+            }
+
+
+            protected override ImmutableArray<KeyValuePair<string, TypedConstant>> CommonNamedArguments
+            {
+               get
+               {
+                  return m_source.NamedArguments.Where(arg => !arg.Key.Equals("AsyncPattern")).ToImmutableArray();
+               }
+            }
+         }
+      }
+
+      private ImmutableArray<OperationContractMethodInfo> GetOperationContractMethods(SemanticModel semanticModel, INamedTypeSymbol serviceInterface)
+      {
+         ITypeSymbol operationContractAttributeType = semanticModel.Compilation.RequireTypeByMetadataName("System.ServiceModel.OperationContractAttribute");
+
+         var arrayBuilder = ImmutableArray.CreateBuilder<OperationContractMethodInfo>();
+         foreach (IMethodSymbol sourceMethod in serviceInterface.GetAllMembers().OfType<IMethodSymbol>().Where(m => m.GetAttribute(operationContractAttributeType) != null))
+         {
+            arrayBuilder.Add(new OperationContractMethodInfo(semanticModel, sourceMethod));
+
+         }
+
+         return arrayBuilder.ToImmutable();         
+      }
+
+      private ImmutableList<MethodDeclarationSyntax> GetOperationContractMethodDeclarations(SemanticModel semanticModel, SyntaxGenerator gen, INamedTypeSymbol serviceInterface, bool includeAttributes, bool includeSourceInterfaceMethods, bool excludeAsyncMethods)
       {
          ImmutableList<MethodDeclarationSyntax> methods = ImmutableList<MethodDeclarationSyntax>.Empty;
-         var genericTaskType = GetGenericTaskType(context);            
-         var voidTaskType = GetVoidTaskType(context);
 
-         foreach (IMethodSymbol sourceMethod in serviceInterface.GetAllMembers().OfType<IMethodSymbol>())
+         var sourceMethods = GetOperationContractMethods(semanticModel, serviceInterface);
+
+         foreach (var methodInfo in sourceMethods)
          {
-            AttributeData operationAttribute = sourceMethod.GetAttributes().Where(attr => attr.AttributeClass.Equals(GetOperationContractAttributeType(context))).FirstOrDefault();
-            var nonOperationAttributes = sourceMethod.GetAttributes().Where(attr => !attr.AttributeClass.Equals(GetOperationContractAttributeType(context)));
-            if (operationAttribute != null)
+            // Emit non-async version of method
+            if (!(methodInfo.IsAsync && sourceMethods.Any(m => m.ContractMacthes(methodInfo) && m.IsAsync == false)))
             {
-               bool sourceIsAsync = false;
+               SyntaxNode targetMethod = gen.MethodDeclaration(methodInfo.Method);
+               targetMethod = gen.WithType(targetMethod, gen.TypeExpression(methodInfo.ContractReturnType));
+               targetMethod = gen.WithName(targetMethod, methodInfo.ContractMethodName);
 
-               var asyncPatternArgument = operationAttribute.NamedArguments.FirstOrDefault(a => a.Key.Equals("AsyncPattern"));
-               if (asyncPatternArgument.Key != null)
+               if (includeAttributes)
                {
-                  if (asyncPatternArgument.Value.Value is Boolean)
-                     sourceIsAsync = (bool)asyncPatternArgument.Value.Value;
+                  targetMethod = gen.AddAttributes(targetMethod, methodInfo.AllAttributes.Select(a => gen.Attribute(a)));                  
                }
+               targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
+               methods = methods.Add((MethodDeclarationSyntax)targetMethod);
+            }
 
-               string methodName = sourceMethod.Name;
-               ITypeSymbol returnType = sourceMethod.ReturnType;
-
-               // Resolve types if method is async.
-               if (sourceIsAsync)
+            // Emit async-version of method
+            if (!excludeAsyncMethods)
+            {
+               if (methodInfo.IsAsync || !sourceMethods.Any(m => m.ContractMacthes(methodInfo) && m.IsAsync))
                {
-                  if (methodName.EndsWith("Async"))
-                     methodName = methodName.Substring(0, methodName.Length - "Async".Length);
+                  SyntaxNode targetMethod = gen.MethodDeclaration(methodInfo.Method);
+                  targetMethod = gen.WithType(targetMethod, gen.TypeExpression(methodInfo.AsyncReturnType));
+                  targetMethod = gen.WithName(targetMethod, methodInfo.ContractMethodName + "Async");
 
-                  if (returnType.Equals(voidTaskType))
-                  {
-                     returnType = context.Compilation.GetSpecialType(SpecialType.System_Void);
-                  }
-                  else
-                  {
-                     INamedTypeSymbol namedReturnType = returnType as INamedTypeSymbol;
-                     if (namedReturnType == null)
-                        throw new TextFileGeneratorException(sourceMethod, $"Unexpected return type (not a named type) in async method. Expected System.Threading.Tasks.Task.");
-
-                     if (IsGenericTaskType(context, namedReturnType))
-                     {
-                        returnType = namedReturnType.TypeArguments[0];
-                     }
-                     else
-                     {
-                        throw new TextFileGeneratorException(sourceMethod, $"Unexpected return type from AsyncPattern OperationContract {sourceMethod.Name}; Expected System.Threading.Tasks.Task.");
-                     }
-                  }
-               }
-
-               // Create Non-async version of method.
-               if (includeSourceInterfaceMethods || sourceIsAsync)
-               {
-                  SyntaxNode targetMethod = context.Generator.MethodDeclaration(sourceMethod);
-                  targetMethod = context.Generator.WithType(targetMethod, context.Generator.TypeExpression(returnType));
-                  targetMethod = context.Generator.WithName(targetMethod, methodName);
                   if (includeAttributes)
                   {
-                     targetMethod = context.Generator.AddAttributes(targetMethod, nonOperationAttributes.Select(a => context.Generator.Attribute(a)));
-                     if (sourceIsAsync)
-                     {
-                        targetMethod = context.Generator.AddAttributes(targetMethod,
-                           context.Generator.Attribute(
-                              context.Generator.TypeExpression(GetOperationContractAttributeType(context)),
-                           operationAttribute.NamedArguments.Where(arg => arg.Key != "AsyncPattern").Select(arg => context.Generator.AttributeArgument(arg.Key, context.Generator.TypedConstantExpression(arg.Value)))));
-                     }
-                     else
-                     {
-                        targetMethod = context.Generator.AddAttributes(targetMethod, context.Generator.Attribute(operationAttribute));
-                     }
+                     targetMethod = gen.AddAttributes(targetMethod, methodInfo.AdditionalAttributes.Select(a => gen.Attribute(a)));
+                     targetMethod = gen.AddAttributes(targetMethod,
+                        gen.AddAttributeArguments(gen.Attribute(methodInfo.OperationContractAttribute), new[] { gen.AttributeArgument("AsyncPattern", gen.TrueLiteralExpression()) })
+                     );
                   }
-                  targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
-                  methods = methods.Add((MethodDeclarationSyntax)targetMethod);
-               }
 
-               if (!excludeAsyncMethods && (includeSourceInterfaceMethods || !sourceIsAsync))
-               {
-                  SyntaxNode targetMethod = context.Generator.MethodDeclaration(sourceMethod);
-                  targetMethod = context.Generator.WithType(targetMethod,
-                     context.Generator.TypeExpression(returnType.SpecialType == SpecialType.System_Void ? voidTaskType : genericTaskType.Construct(returnType)));
-                  targetMethod = context.Generator.WithName(targetMethod, methodName + "Async");
-                  if (includeAttributes)
-                  {
-                     targetMethod = context.Generator.AddAttributes(targetMethod, nonOperationAttributes.Select(a => context.Generator.Attribute(a)));
-                     if (sourceIsAsync)
-                     {
-                        targetMethod = context.Generator.AddAttributes(targetMethod, context.Generator.Attribute(operationAttribute));
-                     }
-                     else
-                     {
-                        targetMethod = context.Generator.AddAttributes(targetMethod,
-                           context.Generator.Attribute(context.Generator.TypeExpression(GetOperationContractAttributeType(context)),
-                           operationAttribute.NamedArguments
-                              .Where(arg => arg.Key != "AsyncPattern")
-                              .Select(arg => context.Generator.AttributeArgument(arg.Key, context.Generator.TypedConstantExpression(arg.Value)))
-                              .Concat(new[] { context.Generator.AttributeArgument("AsyncPattern", context.Generator.TrueLiteralExpression()) })));
-                     }
-                  }
                   targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
                   methods = methods.Add((MethodDeclarationSyntax)targetMethod);
                }
             }
          }
+         
          return methods;
-      }
+      }      
 
       private INamedTypeSymbol GetVoidTaskType(CSharpRoslynCodeGenerationContext context)
       {

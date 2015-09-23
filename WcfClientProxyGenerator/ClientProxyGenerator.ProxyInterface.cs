@@ -19,23 +19,23 @@ namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {  
-      public InterfaceDeclarationSyntax GenerateProxyInterface(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceServiceInterface, string targetInterfaceName, Accessibility accessibility = Accessibility.Public, bool inheritServiceInterface = false, bool suppressAsyncMethodGeneration = false)
+      public InterfaceDeclarationSyntax GenerateProxyInterface(SemanticModel semanticModel, SyntaxGenerator generator, INamedTypeSymbol sourceServiceInterface, string targetInterfaceName, Accessibility accessibility = Accessibility.Public, bool inheritServiceInterface = false, bool suppressAsyncMethodGeneration = false)
       {
-         SyntaxNode targetInterface = context.Generator.InterfaceDeclaration(targetInterfaceName, accessibility: accessibility);
+         SyntaxNode targetInterface = generator.InterfaceDeclaration(targetInterfaceName, accessibility: accessibility);
 
-         targetInterface = context.Generator.AddAttributes(targetInterface, sourceServiceInterface.GetAttributes().Select(attr => context.Generator.Attribute(attr)));
+         targetInterface = generator.AddAttributes(targetInterface, sourceServiceInterface.GetAttributes().Select(attr => generator.Attribute(attr)));
 
-         foreach (SyntaxNode method in GetWcfClientProxyInterfaceMethods(context, sourceServiceInterface, true, !inheritServiceInterface, suppressAsyncMethodGeneration))
+         foreach (SyntaxNode method in GetOperationContractMethodDeclarations(semanticModel, generator, sourceServiceInterface, true, !inheritServiceInterface, suppressAsyncMethodGeneration))
          {
-            targetInterface = context.Generator.AddMembers(targetInterface, method);
+            targetInterface = generator.AddMembers(targetInterface, method);
          }
 
          if (inheritServiceInterface)
          {
-            targetInterface = context.Generator.AddInterfaceType(targetInterface, context.Generator.TypeExpression(sourceServiceInterface));
+            targetInterface = generator.AddInterfaceType(targetInterface, generator.TypeExpression(sourceServiceInterface));
          }
 
-         targetInterface = AddGeneratedCodeAttribute(context.Generator, targetInterface);
+         targetInterface = AddGeneratedCodeAttribute(generator, targetInterface);
 
          return (InterfaceDeclarationSyntax)targetInterface;
       }
