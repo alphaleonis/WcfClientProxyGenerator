@@ -19,7 +19,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {
-      public ClassDeclarationSyntax GenerateProxyClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceProxyInterface, string name = null, Accessibility accessibility = Accessibility.Public)
+      public ClassDeclarationSyntax GenerateProxyClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceProxyInterface, string name, Accessibility accessibility, bool suppressWarningComments, MemberAccessibility constructorAccessibility)
       {
          if (name == null)
          {
@@ -56,17 +56,26 @@ namespace Alphaleonis.WcfClientProxyGenerator
          // Create class declaration
          SyntaxNode targetClass = context.Generator.ClassDeclaration(name, accessibility: accessibility, baseType: context.Generator.TypeExpression(baseType), interfaceTypes: new[] { context.Generator.TypeExpression(sourceProxyInterface) });
 
+         targetClass = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetClass);
+         
+
          // Copy constructors from base class.
          foreach (var baseCtor in baseType.Constructors.Where(ctor => ctor.DeclaredAccessibility != Accessibility.Private))
          {
             var targetCtor = context.Generator.ConstructorDeclaration(baseCtor, baseCtor.Parameters.Select(p => context.Generator.Argument(context.Generator.IdentifierName(p.Name))));
-            targetCtor = context.Generator.WithAccessibility(targetCtor, Accessibility.Public);
-            targetClass = context.Generator.AddMembers(targetClass, targetCtor).AddNewLineTrivia().AddNewLineTrivia();
+
+            targetCtor = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetCtor);
+
+            targetCtor = context.Generator.WithAccessibility(targetCtor, ToAccessibility(constructorAccessibility));
+            targetClass = context.Generator.AddMembers(targetClass, targetCtor.AddNewLineTrivia());
          }
 
          foreach (IMethodSymbol sourceMethod in GetOperationContractMethods(context, sourceProxyInterface))
          {
             SyntaxNode targetMethod = context.Generator.MethodDeclaration(sourceMethod);
+
+            targetMethod = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetMethod);
+
             targetMethod = context.Generator.WithModifiers(targetMethod, DeclarationModifiers.None);
 
             bool isVoid = sourceMethod.ReturnType.SpecialType == SpecialType.System_Void;
@@ -95,10 +104,34 @@ namespace Alphaleonis.WcfClientProxyGenerator
                   statement
                }
             );
-            targetClass = context.Generator.AddMembers(targetClass, targetMethod);
+            targetClass = context.Generator.AddMembers(targetClass, targetMethod.AddNewLineTrivia());
          }
 
          return (ClassDeclarationSyntax)targetClass;
+      }
+
+      private static Accessibility ToAccessibility(MemberAccessibility accessibility)
+      {
+         switch (accessibility)
+         {
+            case MemberAccessibility.Public:
+               return Accessibility.Public;
+               
+            case MemberAccessibility.Protected:
+               return Accessibility.Protected;
+
+            case MemberAccessibility.Internal:
+               return Accessibility.Internal;
+
+            case MemberAccessibility.Private:
+               return Accessibility.Private;
+
+            case MemberAccessibility.ProtectedInternal:
+               return Accessibility.ProtectedOrInternal;
+
+            default:
+               throw new NotSupportedException($"Invalid accessibility {accessibility}.");
+         }
       }
    }   
 }

@@ -53,9 +53,9 @@ namespace Alphaleonis.WcfClientProxyGenerator
             CancellationTokenParameterName = GetUniqueParameterName("cancellationToken", method);
             ProxyVariableName = GetUniqueParameterName("proxy", method);
          }
-      }
+      }      
 
-      public ClassDeclarationSyntax GenerateClientClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol proxyInterface, string name = null, Accessibility accessibility = Accessibility.Public, bool includeCancellableAsyncMethods = true)
+      public ClassDeclarationSyntax GenerateClientClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol proxyInterface, string name, Accessibility accessibility, bool includeCancellableAsyncMethods, bool suppressWarningComments, MemberAccessibility constructorAccessibility)
       {
          if (name == null)
          {
@@ -71,6 +71,9 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
          SyntaxGenerator gen = context.Generator;
          SyntaxNode targetClass = gen.ClassDeclaration(name, baseType: gen.TypeExpression(RequireTypeSymbol<MarshalByRefObject>(context)), accessibility: accessibility, modifiers: DeclarationModifiers.Sealed);
+
+         targetClass = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetClass);
+
          targetClass = gen.AddInterfaceType(targetClass, gen.TypeExpression(context.Compilation.GetSpecialType(SpecialType.System_IDisposable)));
          targetClass = gen.AddInterfaceType(targetClass, gen.TypeExpression(proxyInterface));
 
@@ -82,18 +85,27 @@ namespace Alphaleonis.WcfClientProxyGenerator
          #region Private Fields
 
          // ==> private IProxy m_cachedProxy;
-         targetClass = gen.AddMembers(targetClass, gen.FieldDeclaration(nameTable.CachedProxyFieldName, gen.TypeExpression(proxyInterface), Accessibility.Private, DeclarationModifiers.None));
+         SyntaxNode cachedProxyField =
+            gen.FieldDeclaration(nameTable.CachedProxyFieldName, gen.TypeExpression(proxyInterface), Accessibility.Private, DeclarationModifiers.None)
+            .PrependLeadingTrivia(gen.CreateRegionTrivia("Private Fields"));
+
+         targetClass = gen.AddMembers(targetClass, cachedProxyField);
 
          // ==> private readonly Func<IProxy> m_proxyFactory;
          SyntaxNode proxyFactoryTypeExpression = gen.TypeExpression(context.Compilation.GetTypeByMetadataName("System.Func`1").Construct(proxyInterface));
-         targetClass = gen.AddMembers(targetClass, gen.FieldDeclaration(nameTable.ProxyFactoryFieldName, proxyFactoryTypeExpression, Accessibility.Private, DeclarationModifiers.ReadOnly));
+
+         targetClass = gen.AddMembers(targetClass, gen.FieldDeclaration(nameTable.ProxyFactoryFieldName, proxyFactoryTypeExpression, Accessibility.Private, DeclarationModifiers.ReadOnly)
+            .AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia());
 
          #endregion
 
          #region Constructor
 
          // Constructor         
-         SyntaxNode constructor = gen.ConstructorDeclaration(parameters: new[] { gen.ParameterDeclaration("proxyFactory", proxyFactoryTypeExpression) }, accessibility: Accessibility.Public);
+         SyntaxNode constructor = gen.ConstructorDeclaration(parameters: new[] { gen.ParameterDeclaration("proxyFactory", proxyFactoryTypeExpression) }, accessibility: ToAccessibility(constructorAccessibility));
+
+         constructor = gen.AddWarningCommentIf(!suppressWarningComments, constructor);
+         constructor = constructor.PrependLeadingTrivia(gen.CreateRegionTrivia("Constructors"));
 
          constructor = gen.WithStatements(constructor,
             new[]
@@ -111,6 +123,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
                )
             }
          );
+
+         constructor = constructor.AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia();
 
          targetClass = gen.AddMembers(targetClass, constructor);
 
@@ -140,14 +154,21 @@ namespace Alphaleonis.WcfClientProxyGenerator
                gen.ThrowStatement()
             });
 
-         foreach (IMethodSymbol sourceMethod in methods)
+         foreach (var sourceMethodEntry in methods.AsSmartEnumerable())
          {
+            var sourceMethod = sourceMethodEntry.Value;
             nameTable.ResetForMethod(sourceMethod);
 
             bool isAsync = ReturnsTask(context, sourceMethod);
             bool isVoid = sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(GetVoidTaskType(context));
 
             SyntaxNode targetMethod = gen.MethodDeclaration(sourceMethod);
+
+            if (sourceMethodEntry.IsFirst)
+               targetMethod = targetMethod.PrependLeadingTrivia(gen.CreateRegionTrivia("Contract Methods")).AddLeadingTrivia(gen.NewLine());
+
+            targetMethod = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetMethod);
+
             targetMethod = gen.WithModifiers(targetMethod, isAsync ? DeclarationModifiers.Async : DeclarationModifiers.None);
 
 
@@ -165,6 +186,11 @@ namespace Alphaleonis.WcfClientProxyGenerator
                      }
                   )
                });
+
+            targetMethod = targetMethod.AddNewLineTrivia();
+
+            if (sourceMethodEntry.IsLast && !(isAsync && includeCancellableAsyncMethods))
+               targetMethod = targetMethod.AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia();
 
             targetClass = gen.AddMembers(targetClass, targetMethod);
 
@@ -190,6 +216,12 @@ namespace Alphaleonis.WcfClientProxyGenerator
                      )
                   });
 
+
+               targetMethod = gen.AddWarningCommentIf(!suppressWarningComments, targetMethod.AddNewLineTrivia());
+
+               if (sourceMethodEntry.IsLast)
+                  targetMethod = targetMethod.AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia();
+
                targetClass = gen.AddMembers(targetClass, targetMethod);
             }
          }
@@ -198,15 +230,15 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
          #region Internal Methods
 
-         targetClass = gen.AddMembers(targetClass, CreateGetProxyMethod(context, proxyInterface, nameTable, false));
-         targetClass = gen.AddMembers(targetClass, CreateGetProxyMethod(context, proxyInterface, nameTable, true));
-         targetClass = gen.AddMembers(targetClass, CreateStaticCloseProxyMethod(context, nameTable, false));
-         targetClass = gen.AddMembers(targetClass, CreateStaticCloseProxyMethod(context, nameTable, true));
-         targetClass = gen.AddMembers(targetClass, CreateCloseProxyMethod(context, nameTable, false));
-         targetClass = gen.AddMembers(targetClass, CreateCloseProxyMethod(context, nameTable, true));
-         targetClass = gen.AddMembers(targetClass, CreateEnsureProxyMethod(context, nameTable, false));
-         targetClass = gen.AddMembers(targetClass, CreateEnsureProxyMethod(context, nameTable, true));
-         targetClass = gen.AddMembers(targetClass, CreateDisposeMethods(context, nameTable));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateGetProxyMethod(context, proxyInterface, nameTable, false).AddLeadingTrivia(gen.CreateRegionTrivia("Private Methods")).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateGetProxyMethod(context, proxyInterface, nameTable, true).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateStaticCloseProxyMethod(context, nameTable, false).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateStaticCloseProxyMethod(context, nameTable, true).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateCloseProxyMethod(context, nameTable, false).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateCloseProxyMethod(context, nameTable, true).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateEnsureProxyMethod(context, nameTable, false).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateEnsureProxyMethod(context, nameTable, true).AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, CreateDisposeMethods(context, nameTable, suppressWarningComments));
 
          #endregion
 
@@ -763,11 +795,12 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
       }
 
-      private IEnumerable<SyntaxNode> CreateDisposeMethods(CSharpRoslynCodeGenerationContext context, ClientGenerationNameTable nameTable)
+      private IEnumerable<SyntaxNode> CreateDisposeMethods(CSharpRoslynCodeGenerationContext context, ClientGenerationNameTable nameTable, bool suppressWarningComments)
       {
          SyntaxGenerator g = context.Generator;
 
-         yield return g.MethodDeclaration(
+         yield return g.AddWarningCommentIf(!suppressWarningComments,
+         g.MethodDeclaration(
             "Dispose",
             accessibility: Accessibility.Public,
             statements: new SyntaxNode[]
@@ -787,10 +820,11 @@ namespace Alphaleonis.WcfClientProxyGenerator
                   g.ThisExpression()
                )
             }
-         ).PrependLeadingTrivia(g.CreateRegionTrivia("IDisposable"));
+         ))
+         .PrependLeadingTrivia(g.CreateRegionTrivia("IDisposable"));
 
 
-         yield return g.MethodDeclaration(
+         yield return g.AddWarningCommentIf(!suppressWarningComments, g.MethodDeclaration(
             "Dispose",
             parameters: new SyntaxNode[] { g.ParameterDeclaration("disposing", g.TypeExpression(SpecialType.System_Boolean)) },
             accessibility: Accessibility.Private,
@@ -824,7 +858,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                   }
                )
             }
-         ).AddTrailingTrivia(g.CreateEndRegionTrivia());
+         )).AddTrailingTrivia(g.CreateEndRegionTrivia());
       }
    }
 }

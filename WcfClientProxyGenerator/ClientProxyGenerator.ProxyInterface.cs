@@ -19,7 +19,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {  
-      public InterfaceDeclarationSyntax GenerateProxyInterface(SemanticModel semanticModel, SyntaxGenerator generator, INamedTypeSymbol sourceServiceInterface, string targetInterfaceName, Accessibility accessibility = Accessibility.Public, bool inheritServiceInterface = false, bool suppressAsyncMethodGeneration = false)
+      public InterfaceDeclarationSyntax GenerateProxyInterface(SemanticModel semanticModel, SyntaxGenerator generator, INamedTypeSymbol sourceServiceInterface, string targetInterfaceName, Accessibility accessibility = Accessibility.Public, bool inheritServiceInterface = false, bool suppressAsyncMethodGeneration = false, bool suppressWarningComments = false)
       {
          SyntaxNode targetInterface = generator.InterfaceDeclaration(targetInterfaceName, accessibility: accessibility);
 
@@ -27,7 +27,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
          foreach (SyntaxNode method in GetOperationContractMethodDeclarations(semanticModel, generator, sourceServiceInterface, true, !inheritServiceInterface, suppressAsyncMethodGeneration))
          {
-            targetInterface = generator.AddMembers(targetInterface, method);
+            targetInterface = generator.AddMembers(targetInterface, generator.AddWarningCommentIf(!suppressWarningComments, method));
          }
 
          if (inheritServiceInterface)
@@ -36,6 +36,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
          }
 
          targetInterface = AddGeneratedCodeAttribute(generator, targetInterface);
+
+         targetInterface = generator.AddWarningCommentIf(!suppressWarningComments, targetInterface);
 
          return (InterfaceDeclarationSyntax)targetInterface;
       }

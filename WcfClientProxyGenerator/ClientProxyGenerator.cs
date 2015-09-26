@@ -15,22 +15,29 @@ using Microsoft.CodeAnalysis.CSharp;
 using System.Threading;
 using System.Runtime.InteropServices;
 
-// TODO: Add Warning Comments about code being generated.
-// TODO: Attribute should reuqire the type or type-name as the first argument! Can we find a type that is not referenced? If not, add a method to search for it!
 namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {
-      private const string GenerateWcfClientAttributeName = "GenerateWcfClientAttribute";
-
-      private static CSharpRoslynCodeGenerationContext AddType(CSharpRoslynCodeGenerationContext context, CompilationUnitSyntax newCu)
+      public static async Task<CompilationUnitSyntax> Generate(CSharpRoslynCodeGenerationContext context)
       {
-         return context.WithDocument(context.Document.Project.AddDocument(Guid.NewGuid().ToString() + ".g.cs", newCu).Project.GetDocument(context.Document.Id));
+         ClientProxyGenerator generator = new ClientProxyGenerator();
+
+         CompilationUnitSyntax targetCompilationUnit = SyntaxFactory.CompilationUnit(context.CompilationUnit.Externs, context.CompilationUnit.Usings, SyntaxFactory.List<AttributeListSyntax>(), SyntaxFactory.List<MemberDeclarationSyntax>());
+         targetCompilationUnit = targetCompilationUnit.AddMembers(GenerateProxyInterfaces(context, generator).ToArray());
+         context = await AddCompilationUnit(context, targetCompilationUnit);
+         targetCompilationUnit = targetCompilationUnit.AddMembers(GenerateProxyClasses(context, generator).ToArray());
+         return targetCompilationUnit;
+      }
+
+      private static Task<CSharpRoslynCodeGenerationContext> AddCompilationUnit(CSharpRoslynCodeGenerationContext context, CompilationUnitSyntax compilationUnit)
+      {
+         return context.WithDocumentAsync(context.Document.Project.AddDocument(Guid.NewGuid().ToString() + ".g.cs", compilationUnit).Project.GetDocument(context.Document.Id));
       }
 
       private static IReadOnlyList<MemberDeclarationSyntax> GenerateProxyClasses(CSharpRoslynCodeGenerationContext context, ClientProxyGenerator generator)
       {
-         var sourceClasses = context.CompilationUnit.TopLevelClasses();
+         var sourceClasses = context.CompilationUnit.DescendantNodes().OfType<ClassDeclarationSyntax>();
 
          ImmutableList<MemberDeclarationSyntax> members = ImmutableList<MemberDeclarationSyntax>.Empty;
 
@@ -41,7 +48,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
             var generationAttribute = GetGenerationAttribute(sourceClassSymbol);
             if (generationAttribute != null)
             {
-               GenerationOptions options = new GenerationOptions(generationAttribute);
+               GenerationOptions options = AttributeParser.CreateInstanceFromAttribute<GenerationOptions>(generationAttribute);
+
                INamedTypeSymbol serviceInterfaceSymbol;
                serviceInterfaceSymbol = ResolveServiceInterface(context.Compilation, sourceClassSymbol, options);
 
@@ -52,20 +60,13 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
                ClassDeclarationSyntax targetClass;
                if (options.Wrapper)
-                  targetClass = generator.GenerateClientClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility, true);
+                  targetClass = generator.GenerateClientClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility, true, options.SuppressWarningComments, options.ConstructorVisibility);
                else
-                  targetClass = generator.GenerateProxyClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility);
+                  targetClass = generator.GenerateProxyClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility, options.SuppressWarningComments, options.ConstructorVisibility);
 
                targetClass = context.Generator.AddModifiers(targetClass, DeclarationModifiers.Partial);
 
-               MemberDeclarationSyntax result = targetClass;
-               if (sourceClassSymbol.ContainingNamespace != null && !sourceClassSymbol.ContainingNamespace.IsGlobalNamespace)
-               {
-                  var targetNamespace = SyntaxFactory.NamespaceDeclaration(SyntaxFactory.IdentifierName(sourceClassSymbol.ContainingNamespace.GetFullName()), SyntaxFactory.List<ExternAliasDirectiveSyntax>(), SyntaxFactory.List<UsingDirectiveSyntax>(), SyntaxFactory.List<MemberDeclarationSyntax>());
-                  result = targetNamespace.AddMembers(result);
-               }
-
-               members = members.Add(result);
+               members = members.Add(CreateEnclosingMembers(context, sourceClass, targetClass));
             }
          }
 
@@ -74,7 +75,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
       private static IReadOnlyList<MemberDeclarationSyntax> GenerateProxyInterfaces(CSharpRoslynCodeGenerationContext context, ClientProxyGenerator generator)
       {
-         var sourceInterfaces = context.CompilationUnit.TopLevelInterfaces();
+         var sourceInterfaces = context.CompilationUnit.DescendantNodes().OfType<InterfaceDeclarationSyntax>();
          
          ImmutableList<MemberDeclarationSyntax> members = ImmutableList<MemberDeclarationSyntax>.Empty;
 
@@ -85,7 +86,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
             var generationAttribute = GetGenerationAttribute(sourceInterfaceSymbol);
             if (generationAttribute != null)
             {
-               GenerationOptions options = new GenerationOptions(generationAttribute);
+               GenerationOptions options = AttributeParser.CreateInstanceFromAttribute<GenerationOptions>(generationAttribute);                  
 
                INamedTypeSymbol serviceInterfaceSymbol;
                serviceInterfaceSymbol = ResolveServiceInterface(context.Compilation, sourceInterfaceSymbol, options);
@@ -97,18 +98,11 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
                bool implementsSourceInterface = sourceInterfaceSymbol.AllInterfaces.Any(i => i.Equals(serviceInterfaceSymbol));
 
-               InterfaceDeclarationSyntax targetInterface = generator.GenerateProxyInterface(context.SemanticModel, context.Generator, serviceInterfaceSymbol, sourceInterfaceSymbol.Name, sourceInterfaceSymbol.DeclaredAccessibility, implementsSourceInterface, options.SuppressAsyncMethods);
+               InterfaceDeclarationSyntax targetInterface = generator.GenerateProxyInterface(context.SemanticModel, context.Generator, serviceInterfaceSymbol, sourceInterfaceSymbol.Name, sourceInterfaceSymbol.DeclaredAccessibility, implementsSourceInterface, options.SuppressAsyncMethods, options.SuppressWarningComments);
 
                targetInterface = context.Generator.AddModifiers(targetInterface, DeclarationModifiers.Partial);
 
-               MemberDeclarationSyntax result = targetInterface;
-               if (sourceInterfaceSymbol.ContainingNamespace != null && !sourceInterfaceSymbol.ContainingNamespace.IsGlobalNamespace)
-               {
-                  var targetNamespace = SyntaxFactory.NamespaceDeclaration(SyntaxFactory.IdentifierName(sourceInterfaceSymbol.ContainingNamespace.GetFullName()), SyntaxFactory.List<ExternAliasDirectiveSyntax>(), SyntaxFactory.List<UsingDirectiveSyntax>(), SyntaxFactory.List<MemberDeclarationSyntax>());
-                  result = targetNamespace.AddMembers(result);
-               }
-
-               members = members.Add(result);
+               members = members.Add(CreateEnclosingMembers(context, sourceInterface, targetInterface));
             }
          }
 
@@ -149,10 +143,10 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
       private static AttributeData GetGenerationAttribute(INamedTypeSymbol source)
       {
-         var result = source.GetAttributes().Where(attr => attr.AttributeClass.Name.Equals(GenerateWcfClientAttributeName)).ToImmutableArray();
+         var result = source.GetAttributes().Where(attr => attr.AttributeClass.Name.Equals(GenerationOptions.AttributeName)).ToImmutableArray();
 
          if (result.Length > 1)
-            throw new TextFileGeneratorException(source, $"The {source.TypeKind} '{source.Name}' is decorated with multiple attributes of type '{GenerateWcfClientAttributeName}'. Only one such attribute is allowed.");
+            throw new TextFileGeneratorException(source, $"The {source.TypeKind} '{source.Name}' is decorated with multiple attributes of type '{GenerationOptions.AttributeName}'. Only one such attribute is allowed.");
 
          if (result.Length == 0)
             return null;
@@ -160,23 +154,30 @@ namespace Alphaleonis.WcfClientProxyGenerator
          return result[0];
       }
 
-      public static async Task<CompilationUnitSyntax> Generate(CSharpRoslynCodeGenerationContext context)
+
+      private static MemberDeclarationSyntax CreateEnclosingMembers(CSharpRoslynCodeGenerationContext context, MemberDeclarationSyntax sourceMember, MemberDeclarationSyntax targetMember)
       {
-         ClientProxyGenerator generator = new ClientProxyGenerator();
+         ISymbol sourceMemberSymbol = context.SemanticModel.GetDeclaredSymbol(sourceMember);
+         MemberDeclarationSyntax result = targetMember;
+         
+         while (sourceMember.Parent is ClassDeclarationSyntax)
+         {
+            result = (MemberDeclarationSyntax)context.Generator.ClassDeclaration(context.Generator.GetName(sourceMember.Parent), accessibility: context.Generator.GetAccessibility(sourceMember.Parent),
+               modifiers: context.Generator.GetModifiers(sourceMember.Parent).WithPartial(true), members: new[] { result });
 
-         //context = RemoveGeneratedPartsOfMemberDeclaration(context, cu => cu.TopLevelInterfaces());
-         //context = RemoveGeneratedPartsOfMemberDeclaration(context, cu => cu.TopLevelClasses());
+            sourceMember = sourceMember.Parent as MemberDeclarationSyntax;
+         }
 
-         CompilationUnitSyntax targetCompilationUnit = SyntaxFactory.CompilationUnit(context.CompilationUnit.Externs, context.CompilationUnit.Usings, SyntaxFactory.List<AttributeListSyntax>(), SyntaxFactory.List<MemberDeclarationSyntax>());
-         targetCompilationUnit = targetCompilationUnit.AddMembers(GenerateProxyInterfaces(context, generator).ToArray());
-         context = AddType(context, targetCompilationUnit);
-         targetCompilationUnit = targetCompilationUnit.AddMembers(GenerateProxyClasses(context, generator).ToArray());         
-         return targetCompilationUnit;
+         if (sourceMemberSymbol.ContainingNamespace != null && !sourceMemberSymbol.ContainingNamespace.IsGlobalNamespace)
+         {
+            var targetNamespace = SyntaxFactory.NamespaceDeclaration(SyntaxFactory.IdentifierName(sourceMemberSymbol.ContainingNamespace.GetFullName()), SyntaxFactory.List<ExternAliasDirectiveSyntax>(), SyntaxFactory.List<UsingDirectiveSyntax>(), SyntaxFactory.List<MemberDeclarationSyntax>());
+            result = targetNamespace.AddMembers(result);
+         }
+
+         return result;
       }
 
       #region Properties
-
-      //public CSharpRoslynCodeGenerationContext Context { get; }
 
       private INamedTypeSymbol GetOperationContractAttributeType(CSharpRoslynCodeGenerationContext context)
       {
