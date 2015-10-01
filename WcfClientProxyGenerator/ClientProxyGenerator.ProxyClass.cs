@@ -19,7 +19,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {
-      public ClassDeclarationSyntax GenerateProxyClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceProxyInterface, string name, Accessibility accessibility, bool suppressWarningComments, MemberAccessibility constructorAccessibility)
+      public ClassDeclarationSyntax GenerateProxyClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceProxyInterface, string name, Accessibility accessibility, bool suppressWarningComments, MemberAccessibility constructorAccessibility, out IEnumerable<IMethodSymbol> sourceConstructors)
       {
          if (name == null)
          {
@@ -57,10 +57,12 @@ namespace Alphaleonis.WcfClientProxyGenerator
          SyntaxNode targetClass = context.Generator.ClassDeclaration(name, accessibility: accessibility, baseType: context.Generator.TypeExpression(baseType), interfaceTypes: new[] { context.Generator.TypeExpression(sourceProxyInterface) });
 
          targetClass = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetClass);
-         
+
 
          // Copy constructors from base class.
-         foreach (var baseCtor in baseType.Constructors.Where(ctor => ctor.DeclaredAccessibility != Accessibility.Private))
+         sourceConstructors = baseType.Constructors.Where(ctor => ctor.DeclaredAccessibility != Accessibility.Private).ToImmutableArray();
+
+         foreach (var baseCtor in sourceConstructors)
          {
             var targetCtor = context.Generator.ConstructorDeclaration(baseCtor, baseCtor.Parameters.Select(p => context.Generator.Argument(context.Generator.IdentifierName(p.Name))));
 

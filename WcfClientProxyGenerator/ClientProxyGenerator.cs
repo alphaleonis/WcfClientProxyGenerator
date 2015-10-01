@@ -26,7 +26,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          CompilationUnitSyntax targetCompilationUnit = SyntaxFactory.CompilationUnit(context.CompilationUnit.Externs, context.CompilationUnit.Usings, SyntaxFactory.List<AttributeListSyntax>(), SyntaxFactory.List<MemberDeclarationSyntax>());
          targetCompilationUnit = targetCompilationUnit.AddMembers(GenerateProxyInterfaces(context, generator).ToArray());
          context = await AddCompilationUnit(context, targetCompilationUnit);
-         targetCompilationUnit = targetCompilationUnit.AddMembers(GenerateProxyClasses(context, generator).ToArray());
+         targetCompilationUnit = targetCompilationUnit.AddMembers((await GenerateProxyClasses(context, generator)).ToArray());
          return targetCompilationUnit;
       }
 
@@ -35,7 +35,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          return context.WithDocumentAsync(context.Document.Project.AddDocument(Guid.NewGuid().ToString() + ".g.cs", compilationUnit).Project.GetDocument(context.Document.Id));
       }
 
-      private static IReadOnlyList<MemberDeclarationSyntax> GenerateProxyClasses(CSharpRoslynCodeGenerationContext context, ClientProxyGenerator generator)
+      private static async Task<IReadOnlyList<MemberDeclarationSyntax>> GenerateProxyClasses(CSharpRoslynCodeGenerationContext context, ClientProxyGenerator generator)
       {
          var sourceClasses = context.CompilationUnit.DescendantNodes().OfType<ClassDeclarationSyntax>();
 
@@ -59,10 +59,11 @@ namespace Alphaleonis.WcfClientProxyGenerator
                }
 
                ClassDeclarationSyntax targetClass;
+               IEnumerable<IMethodSymbol> dummy;
                if (options.Wrapper)
-                  targetClass = generator.GenerateClientClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility, true, options.SuppressWarningComments, options.ConstructorVisibility);
+                  targetClass = await generator.GenerateClientClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility, true, options.SuppressWarningComments, options.ConstructorVisibility, options.WithInternalProxy);
                else
-                  targetClass = generator.GenerateProxyClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility, options.SuppressWarningComments, options.ConstructorVisibility);
+                  targetClass = generator.GenerateProxyClass(context, serviceInterfaceSymbol, sourceClassSymbol.Name, sourceClassSymbol.DeclaredAccessibility, options.SuppressWarningComments, options.ConstructorVisibility, out dummy);
 
                targetClass = context.Generator.AddModifiers(targetClass, DeclarationModifiers.Partial);
 

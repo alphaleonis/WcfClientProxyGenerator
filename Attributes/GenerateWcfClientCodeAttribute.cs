@@ -34,6 +34,8 @@ namespace Alphaleonis
 
       public bool Wrapper { get; set; }
 
+      public bool WithInternalProxy { get; set; }
+
       public GeneratedMemberAccessibility ConstructorVisibility { get; set; }
    }
 

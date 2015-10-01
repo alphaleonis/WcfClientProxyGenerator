@@ -34,6 +34,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
       public bool Wrapper { get; set; }
 
+      public bool WithInternalProxy { get; set; }
+
       public MemberAccessibility ConstructorVisibility { get; set; }
    }
 

@@ -55,6 +55,7 @@
     <Compile Include="ClientProxyGenerator.ProxyClass.cs" />
     <Compile Include="ClientProxyGenerator.ProxyInterface.cs" />
     <Compile Include="ClientProxyGenerator.Utility.cs" />
+    <Compile Include="GenerationNameTable.cs" />
     <Compile Include="GenerationOptions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="ClientProxyGenerator.cs" />
