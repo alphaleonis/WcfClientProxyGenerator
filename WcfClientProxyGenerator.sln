@@ -7,9 +7,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WcfClientProxyGenerator", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AlphaVSX", "AlphaVSX\AlphaVSX.csproj", "{55C0204E-67A8-475D-95F6-529F9CFFE465}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Attributes", "Attributes", "{D569669F-B3E3-4C80-86FF-36568A01FD8D}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Attributes", "Attributes", "{2D6668C3-30D0-47F1-9A45-8DD4AE3960BC}"
 	ProjectSection(SolutionItems) = preProject
-		Attributes\GenerateWcfClientCodeAttribute.cs = Attributes\GenerateWcfClientCodeAttribute.cs
+		Attributes\WcfClientProxyGeneratorAttributes.cs = Attributes\WcfClientProxyGeneratorAttributes.cs
 	EndProjectSection
 EndProject
 Global

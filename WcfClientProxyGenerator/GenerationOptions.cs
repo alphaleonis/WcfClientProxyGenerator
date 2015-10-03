@@ -7,24 +7,24 @@ using System.Reflection;
 
 namespace Alphaleonis.WcfClientProxyGenerator
 {
-   public class GenerationOptions 
+   internal class ProxyGenerationOptions 
    {
-      public const string AttributeName = "GenerateWcfClientCodeAttribute";
+      public const string GenerateProxyAttributeName = "GenerateWcfClientProxyAttribute";
+      public const string GenerateErrorHandlingProxyAttributeName = "GenerateErrorHandlingWcfProxyAttribute";
+      public const string GenerateErrorHandlingProxyWrapperAttributeName = "GenerateErrorHandlingWcfProxyWrapperAttribute";
 
-      public GenerationOptions(INamedTypeSymbol sourceInterfaceType)
+      public ProxyGenerationOptions(INamedTypeSymbol sourceInterfaceType)
       {
          SourceInterfaceType = sourceInterfaceType;
          SourceInterfaceTypeName = sourceInterfaceType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-         ConstructorVisibility = MemberAccessibility.Public;
       }
 
-      public GenerationOptions(string sourceInterfaceTypeName)
+      public ProxyGenerationOptions(string sourceInterfaceTypeName)
       {
          SourceInterfaceTypeName = sourceInterfaceTypeName;
-         ConstructorVisibility = MemberAccessibility.Public;
       }
 
-      public INamedTypeSymbol SourceInterfaceType { get; }
+      public INamedTypeSymbol SourceInterfaceType { get; } 
 
       public string SourceInterfaceTypeName { get; }
 
@@ -32,11 +32,9 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
       public bool SuppressWarningComments { get; set; }
 
-      public bool Wrapper { get; set; }
+      public string AttributeName { get; set; }
 
-      public bool WithInternalProxy { get; set; }
-
-      public MemberAccessibility ConstructorVisibility { get; set; }
+      public MemberAccessibility ConstructorVisibility { get; set; } = MemberAccessibility.Public;
    }
 
    public enum MemberAccessibility

@@ -14,6 +14,8 @@ using AlphaVSX.Roslyn;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Threading;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Alphaleonis.Vsx.Roslyn;
+using Alphaleonis.Vsx.Roslyn.CSharp;
 
 namespace Alphaleonis.WcfClientProxyGenerator
 {
@@ -222,45 +224,13 @@ namespace Alphaleonis.WcfClientProxyGenerator
          
          return methods;
       }      
+                 
 
-      private INamedTypeSymbol GetVoidTaskType(CSharpRoslynCodeGenerationContext context)
+      private bool IsGenericTaskType(Compilation compilation, INamedTypeSymbol namedReturnType)
       {
-         return RequireTypeSymbol<Task>(context);
+         return namedReturnType.IsGenericType && namedReturnType.ConstructUnboundGenericType().Equals(compilation.RequireType(typeof(Task<>)).ConstructUnboundGenericType());
       }
-
-      private INamedTypeSymbol GetGenericTaskType(CSharpRoslynCodeGenerationContext context)
-      {
-         return RequireTypeSymbol(context, typeof(Task<>));
-      }      
-
-      private bool IsGenericTaskType(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol namedReturnType)
-      {
-         return namedReturnType.IsGenericType && namedReturnType.ConstructUnboundGenericType().Equals(RequireTypeSymbol(context, typeof(Task<>)).ConstructUnboundGenericType());
-      }
-
-      private INamedTypeSymbol RequireTypeSymbol<T>(CSharpRoslynCodeGenerationContext context)
-      {
-         return RequireTypeSymbol(context, typeof(T));
-      }
-
-      private INamedTypeSymbol RequireTypeSymbol(CSharpRoslynCodeGenerationContext context, Type type)
-      {
-         INamedTypeSymbol symbol = context.Compilation.GetTypeByMetadataName(type.FullName);
-         if (symbol == null)
-            throw new TextFileGeneratorException($"Unable to find the required type {type.AssemblyQualifiedName} in this context. Are you missing an assembly reference?");
-
-         return symbol;
-      }
-
-      private INamedTypeSymbol RequireTypeSymbol(CSharpRoslynCodeGenerationContext context, string fullyQualifiedTypeName)
-      {
-         INamedTypeSymbol symbol = context.Compilation.GetTypeByMetadataName(fullyQualifiedTypeName);
-         if (symbol == null)
-            throw new TextFileGeneratorException($"Unable to find the required type {fullyQualifiedTypeName} in this context. Are you missing an assembly reference?");
-
-         return symbol;
-      }
-
+     
       private T AddGeneratedCodeAttribute<T>(SyntaxGenerator g, T node) where T : SyntaxNode
       {
          return (T)g.AddAttributes(node,
@@ -276,19 +246,19 @@ namespace Alphaleonis.WcfClientProxyGenerator
          return Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyTitleAttribute>().Title;
       }
 
-      private IEnumerable<IMethodSymbol> GetOperationContractMethods(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol proxyInterface)
+      private IEnumerable<IMethodSymbol> GetOperationContractMethods(Compilation compilation, INamedTypeSymbol proxyInterface)
       {
-         return proxyInterface.GetAllMembers().OfType<IMethodSymbol>().Where(member => member.GetAttributes().Any(attr => attr.AttributeClass.Equals(GetOperationContractAttributeType(context))));
+         return proxyInterface.GetAllMembers().OfType<IMethodSymbol>().Where(member => member.GetAttributes().Any(attr => attr.AttributeClass.Equals(GetOperationContractAttributeType(compilation))));
       }
 
-      private bool ReturnsTask(CSharpRoslynCodeGenerationContext context, IMethodSymbol sourceMethod)
+      private bool ReturnsTask(Compilation compilation, IMethodSymbol sourceMethod)
       {
-         return sourceMethod.ReturnType.Equals(GetVoidTaskType(context)) || IsGenericTaskType(context, ((INamedTypeSymbol)sourceMethod.ReturnType));
+         return sourceMethod.ReturnType.Equals(compilation.RequireType<Task>()) || IsGenericTaskType(compilation, ((INamedTypeSymbol)sourceMethod.ReturnType));
       }
 
-      private bool IsVoid(CSharpRoslynCodeGenerationContext context, IMethodSymbol sourceMethod)
+      private bool IsVoid(Compilation compilation, IMethodSymbol sourceMethod)
       {
-         return sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(GetVoidTaskType(context));
+         return sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(compilation.RequireType<Task>());            
       }
 
       private SyntaxNode AwaitExpressionIfAsync(SyntaxGenerator g, bool isAsync, SyntaxNode expression, bool configureAwait = false)
@@ -315,28 +285,5 @@ namespace Alphaleonis.WcfClientProxyGenerator
       
 
       #endregion
-   }
-
-   internal static class LocalSyntaxGeneratorExtensions
-   {
-      public static SyntaxNode AddWarningComment(this SyntaxGenerator g, SyntaxNode node)
-      {
-         return node.AddLeadingTrivia(
-            g.Comment("/*****************************************************************/"),
-            g.NewLine(),
-            g.Comment("/* WARNING! THIS CODE IS AUTOMATICALLY GENERATED. DO NOT MODIFY! */"),
-            g.NewLine(),
-            g.Comment("/*****************************************************************/")
-         );
-      }
-
-      public static SyntaxNode AddWarningCommentIf(this SyntaxGenerator g, bool condition, SyntaxNode node)
-      {
-         if (condition)
-            return g.AddWarningComment(node);
-         else
-            return node;
-      }
-
    }
 }

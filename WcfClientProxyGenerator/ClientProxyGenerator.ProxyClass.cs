@@ -14,12 +14,14 @@ using AlphaVSX.Roslyn;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Threading;
 using System.Runtime.InteropServices;
+using Alphaleonis.Vsx.Roslyn;
+using Alphaleonis.Vsx.Roslyn.CSharp;
 
 namespace Alphaleonis.WcfClientProxyGenerator
 {
    public partial class ClientProxyGenerator
    {
-      public ClassDeclarationSyntax GenerateProxyClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol sourceProxyInterface, string name, Accessibility accessibility, bool suppressWarningComments, MemberAccessibility constructorAccessibility, out IEnumerable<IMethodSymbol> sourceConstructors)
+      public ClassDeclarationSyntax GenerateProxyClass(SemanticModel semanticModel, SyntaxGenerator generator, INamedTypeSymbol sourceProxyInterface, string name, Accessibility accessibility, bool suppressWarningComments, MemberAccessibility constructorAccessibility, out IEnumerable<IMethodSymbol> sourceConstructors)
       {
          if (name == null)
          {
@@ -29,11 +31,13 @@ namespace Alphaleonis.WcfClientProxyGenerator
                name = sourceProxyInterface.Name + "Proxy";
          }
 
+         var compilation = semanticModel.Compilation;
+
          // Resolve the callback contract if any
-         ITypeSymbol serviceContractAttributeType = RequireTypeSymbol(context, "System.ServiceModel.ServiceContractAttribute");
+         ITypeSymbol serviceContractAttributeType = compilation.RequireTypeByMetadataName("System.ServiceModel.ServiceContractAttribute");
          AttributeData serviceContractAttribute = sourceProxyInterface.GetAttributes().FirstOrDefault(attr => attr.AttributeClass.Equals(serviceContractAttributeType));
          if (serviceContractAttribute == null)
-            throw new TextFileGeneratorException(sourceProxyInterface, $"The interface {sourceProxyInterface.Name} is not decorated with ServiceContractAttribute.");
+            throw new CodeGeneratorException(sourceProxyInterface, $"The interface {sourceProxyInterface.Name} is not decorated with ServiceContractAttribute.");
 
          ITypeSymbol callbackContractType;
          var callbackContractArg = serviceContractAttribute.NamedArguments.FirstOrDefault(arg => arg.Key.Equals("CallbackContract"));
@@ -46,17 +50,17 @@ namespace Alphaleonis.WcfClientProxyGenerator
          INamedTypeSymbol baseType;
          if (callbackContractType != null)
          {
-            baseType = RequireTypeSymbol(context, "System.ServiceModel.DuplexClientBase`1").Construct(sourceProxyInterface);
+            baseType = compilation.RequireTypeByMetadataName("System.ServiceModel.DuplexClientBase`1").Construct(sourceProxyInterface);
          }
          else
          {
-            baseType = RequireTypeSymbol(context, "System.ServiceModel.ClientBase`1").Construct(sourceProxyInterface);
+            baseType = compilation.RequireTypeByMetadataName("System.ServiceModel.ClientBase`1").Construct(sourceProxyInterface);
          }
 
          // Create class declaration
-         SyntaxNode targetClass = context.Generator.ClassDeclaration(name, accessibility: accessibility, baseType: context.Generator.TypeExpression(baseType), interfaceTypes: new[] { context.Generator.TypeExpression(sourceProxyInterface) });
+         SyntaxNode targetClass = generator.ClassDeclaration(name, accessibility: accessibility, baseType: generator.TypeExpression(baseType), interfaceTypes: new[] { generator.TypeExpression(sourceProxyInterface) });
 
-         targetClass = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetClass);
+         targetClass = generator.AddWarningCommentIf(!suppressWarningComments, targetClass);
 
 
          // Copy constructors from base class.
@@ -64,49 +68,49 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
          foreach (var baseCtor in sourceConstructors)
          {
-            var targetCtor = context.Generator.ConstructorDeclaration(baseCtor, baseCtor.Parameters.Select(p => context.Generator.Argument(context.Generator.IdentifierName(p.Name))));
+            var targetCtor = generator.ConstructorDeclaration(baseCtor, baseCtor.Parameters.Select(p => generator.Argument(generator.IdentifierName(p.Name))));
 
-            targetCtor = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetCtor);
+            targetCtor = generator.AddWarningCommentIf(!suppressWarningComments, targetCtor);
 
-            targetCtor = context.Generator.WithAccessibility(targetCtor, ToAccessibility(constructorAccessibility));
-            targetClass = context.Generator.AddMembers(targetClass, targetCtor.AddNewLineTrivia());
+            targetCtor = generator.WithAccessibility(targetCtor, ToAccessibility(constructorAccessibility));
+            targetClass = generator.AddMembers(targetClass, targetCtor.AddNewLineTrivia());
          }
 
-         foreach (IMethodSymbol sourceMethod in GetOperationContractMethods(context, sourceProxyInterface))
+         foreach (IMethodSymbol sourceMethod in GetOperationContractMethods(semanticModel, sourceProxyInterface))
          {
-            SyntaxNode targetMethod = context.Generator.MethodDeclaration(sourceMethod);
+            SyntaxNode targetMethod = generator.MethodDeclaration(sourceMethod);
 
-            targetMethod = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetMethod);
+            targetMethod = generator.AddWarningCommentIf(!suppressWarningComments, targetMethod);
 
-            targetMethod = context.Generator.WithModifiers(targetMethod, DeclarationModifiers.None);
+            targetMethod = generator.WithModifiers(targetMethod, DeclarationModifiers.None);
 
             bool isVoid = sourceMethod.ReturnType.SpecialType == SpecialType.System_Void;
             targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
 
-            var expression = context.Generator.InvocationExpression(
-               context.Generator.MemberAccessExpression(
-                  context.Generator.MemberAccessExpression(
-                     context.Generator.BaseExpression(),
+            var expression = generator.InvocationExpression(
+               generator.MemberAccessExpression(
+                  generator.MemberAccessExpression(
+                     generator.BaseExpression(),
                      "Channel"
                   ),
                   sourceMethod.Name
                ),
-               sourceMethod.Parameters.Select(p => context.Generator.IdentifierName(p.Name)).ToArray()
+               sourceMethod.Parameters.Select(p => generator.IdentifierName(p.Name)).ToArray()
             );
 
             SyntaxNode statement;
             if (!isVoid)
-               statement = context.Generator.ReturnStatement(expression);
+               statement = generator.ReturnStatement(expression);
             else
-               statement = context.Generator.ExpressionStatement(expression);
+               statement = generator.ExpressionStatement(expression);
 
-            targetMethod = context.Generator.WithStatements(targetMethod,
+            targetMethod = generator.WithStatements(targetMethod,
                new[]
                {
                   statement
                }
             );
-            targetClass = context.Generator.AddMembers(targetClass, targetMethod.AddNewLineTrivia());
+            targetClass = generator.AddMembers(targetClass, targetMethod.AddNewLineTrivia());
          }
 
          return (ClassDeclarationSyntax)targetClass;
@@ -118,7 +122,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          {
             case MemberAccessibility.Public:
                return Accessibility.Public;
-               
+
             case MemberAccessibility.Protected:
                return Accessibility.Protected;
 
@@ -135,5 +139,5 @@ namespace Alphaleonis.WcfClientProxyGenerator
                throw new NotSupportedException($"Invalid accessibility {accessibility}.");
          }
       }
-   }   
+   }
 }

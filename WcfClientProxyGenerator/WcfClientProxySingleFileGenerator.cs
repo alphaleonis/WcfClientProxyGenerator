@@ -7,6 +7,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using AlphaVSX.Roslyn;
 using System.Linq;
 using System.Collections.Immutable;
+using System.Threading;
+using Alphaleonis.Vsx.IDE;
+using System.IO;
 
 namespace Alphaleonis.WcfClientProxyGenerator
 {
@@ -25,13 +28,29 @@ namespace Alphaleonis.WcfClientProxyGenerator
       
 
       public WcfClientProxySingleFileGenerator()
-      {
+      {         
       }
 
 
-      protected override Task<CompilationUnitSyntax> GenerateCompilationUnit(CSharpRoslynCodeGenerationContext context)
+      protected override Task<CompilationUnitSyntax> GenerateCompilationUnit(Document sourceDocument)
       {
-         return ClientProxyGenerator.Generate(context);
+         EnvDTE.ProjectItem projItem = GetService(typeof(EnvDTE.ProjectItem)) as EnvDTE.ProjectItem;
+
+         // Remove any previously generated documents first, since we may otherwise get those as well during 
+         // parsing, leading to duplicate method generations.
+         foreach (EnvDTE.ProjectItem item in projItem.ProjectItems)
+         {
+            if (item.FileCount > 0 && item.FileNames[0].EndsWith(GetDefaultExtension()))
+            {
+               var docToRemove = sourceDocument.Project.Documents.FirstOrDefault(doc => doc.FilePath == item.FileNames[0]);
+               if (docToRemove != null)
+               {
+                  sourceDocument = sourceDocument.Project.RemoveDocument(docToRemove.Id).GetDocument(sourceDocument.Id);
+               }
+            }
+         }
+                    
+         return ClientProxyGenerator.Generate(sourceDocument, CancellationToken.None);
       }
 
       protected override string GetDefaultExtension()

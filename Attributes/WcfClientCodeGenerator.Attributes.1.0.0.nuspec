@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+    <metadata>
+        <id>Alphaleonis.WcfClientProxyGenerator.Attributes</id>
+        <version>1.0.0</version>
+        <authors>Peter Palotas</authors>
+        <requireLicenseAcceptance>false</requireLicenseAcceptance>
+        <description>This package contains attributes to support the use of the Visual Studio Custom Tool Alphaleonis WCF Client Proxy Generator.</description>
+        <summary>This package contains attributes to support the use of the Visual Studio Custom Tool Alphaleonis WCF Client Proxy Generator.</summary>
+    </metadata>
+    <files>
+        <file src="WcfClientProxyGeneratorAttributes.cs" target="content\WcfClientProxyGeneratorAttributes.cs" />
+    </files>
+</package>

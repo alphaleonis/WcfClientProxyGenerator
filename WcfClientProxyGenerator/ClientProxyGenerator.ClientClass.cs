@@ -14,6 +14,8 @@ using AlphaVSX.Roslyn;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Threading;
 using System.ComponentModel;
+using Alphaleonis.Vsx.Roslyn;
+using Alphaleonis.Vsx.Roslyn.CSharp;
 
 namespace Alphaleonis.WcfClientProxyGenerator
 {
@@ -40,7 +42,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          public const string ProxyClass = "ProxyChannel";
       }
 
-      public async Task<ClassDeclarationSyntax> GenerateClientClass(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol proxyInterface, string name, Accessibility accessibility, bool includeCancellableAsyncMethods, bool suppressWarningComments, MemberAccessibility constructorAccessibility, bool withInternalProxy)
+      public async Task<ClassDeclarationSyntax> GenerateClientClass(SemanticModel semanticModel, SyntaxGenerator gen, INamedTypeSymbol proxyInterface, string name, Accessibility accessibility, bool includeCancellableAsyncMethods, bool suppressWarningComments, MemberAccessibility constructorAccessibility, bool withInternalProxy)
       {
          if (name == null)
          {
@@ -54,15 +56,18 @@ namespace Alphaleonis.WcfClientProxyGenerator
                name = name + "Client";
          }
 
-         SyntaxGenerator gen = context.Generator;
-         SyntaxNode targetClass = gen.ClassDeclaration(name, baseType: gen.TypeExpression(RequireTypeSymbol<MarshalByRefObject>(context)), accessibility: accessibility, modifiers: DeclarationModifiers.Sealed);
+         
+         SyntaxNode targetClass = gen.ClassDeclaration(name, 
+            baseType: gen.TypeExpression(semanticModel.Compilation.RequireType<MarshalByRefObject>()), 
+            accessibility: accessibility, 
+            modifiers: DeclarationModifiers.Sealed);
 
-         targetClass = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetClass);
+         targetClass = gen.AddWarningCommentIf(!suppressWarningComments, targetClass);
 
-         targetClass = gen.AddInterfaceType(targetClass, gen.TypeExpression(context.Compilation.GetSpecialType(SpecialType.System_IDisposable)));
+         targetClass = gen.AddInterfaceType(targetClass, gen.TypeExpression(semanticModel.Compilation.GetSpecialType(SpecialType.System_IDisposable)));
          targetClass = gen.AddInterfaceType(targetClass, gen.TypeExpression(proxyInterface));
 
-         IEnumerable<IMethodSymbol> methods = GetOperationContractMethods(context, proxyInterface).ToArray();
+         IEnumerable<IMethodSymbol> methods = GetOperationContractMethods(semanticModel.Compilation, proxyInterface).ToArray();
 
          GenerationNameTable nameTable = new GenerationNameTable(methods.Select(m => m.Name).Concat(new[] { name }));
 
@@ -77,7 +82,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          targetClass = gen.AddMembers(targetClass, cachedProxyField);
 
          // ==> private readonly Func<IProxy> m_proxyFactory;
-         SyntaxNode proxyFactoryTypeExpression = gen.TypeExpression(context.Compilation.GetTypeByMetadataName("System.Func`1").Construct(proxyInterface));
+         SyntaxNode proxyFactoryTypeExpression = gen.TypeExpression(semanticModel.Compilation.RequireTypeByMetadataName("System.Func`1").Construct(proxyInterface));
 
          targetClass = gen.AddMembers(targetClass, gen.FieldDeclaration(nameTable[MemberNames.ProxyFactoryField], proxyFactoryTypeExpression, Accessibility.Private, DeclarationModifiers.ReadOnly)
             .AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia());
@@ -122,7 +127,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          if (withInternalProxy)
          {
             IEnumerable<IMethodSymbol> ctors;
-            proxyClass = GenerateProxyClass(context, proxyInterface, nameTable[MemberNames.ProxyClass], Accessibility.Private, suppressWarningComments, MemberAccessibility.Public, out ctors)
+            proxyClass = GenerateProxyClass(semanticModel, gen, proxyInterface, nameTable[MemberNames.ProxyClass], Accessibility.Private, suppressWarningComments, MemberAccessibility.Public, out ctors)
                                                    .PrependLeadingTrivia(gen.CreateRegionTrivia("Proxy Class").Insert(0, gen.NewLine()))
                                                    .AddTrailingTrivia(gen.CreateEndRegionTrivia());
 
@@ -185,15 +190,15 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
             using (nameTable.PushScope(sourceMethod.Parameters.Select(p => p.Name)))
             {
-               bool isAsync = ReturnsTask(context, sourceMethod);
-               bool isVoid = sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(GetVoidTaskType(context));
+               bool isAsync = ReturnsTask(semanticModel.Compilation, sourceMethod);
+               bool isVoid = sourceMethod.ReturnType.SpecialType == SpecialType.System_Void || sourceMethod.ReturnType.Equals(semanticModel.Compilation.RequireType<Task>());
 
                SyntaxNode targetMethod = gen.MethodDeclaration(sourceMethod);
 
                if (sourceMethodEntry.IsFirst)
                   targetMethod = targetMethod.PrependLeadingTrivia(gen.CreateRegionTrivia("Contract Methods")).AddLeadingTrivia(gen.NewLine());
 
-               targetMethod = context.Generator.AddWarningCommentIf(!suppressWarningComments, targetMethod);
+               targetMethod = gen.AddWarningCommentIf(!suppressWarningComments, targetMethod);
 
                targetMethod = gen.WithModifiers(targetMethod, isAsync ? DeclarationModifiers.Async : DeclarationModifiers.None);
 
@@ -204,7 +209,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                   gen.TryCatchStatement(new SyntaxNode[]
                      {
                         CreateProxyVaraibleDeclaration(gen, nameTable, isAsync),
-                        CreateProxyInvocationStatement(context, nameTable, sourceMethod)
+                        CreateProxyInvocationStatement(semanticModel.Compilation, gen, nameTable, sourceMethod)
 
                      }, new SyntaxNode[]
                      {
@@ -223,7 +228,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                if (isAsync && includeCancellableAsyncMethods)
                {
                   targetMethod = gen.MethodDeclaration(sourceMethod);
-                  targetMethod = gen.AddParameters(targetMethod, new[] { gen.ParameterDeclaration(nameTable[MemberNames.CancellationTokenParameter], gen.TypeExpression(RequireTypeSymbol<CancellationToken>(context))) });
+                  targetMethod = gen.AddParameters(targetMethod, new[] { gen.ParameterDeclaration(nameTable[MemberNames.CancellationTokenParameter], gen.TypeExpression(semanticModel.Compilation.RequireType<CancellationToken>())) });
                   targetMethod = gen.WithModifiers(targetMethod, isAsync ? DeclarationModifiers.Async : DeclarationModifiers.None);
 
 
@@ -233,7 +238,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                      gen.TryCatchStatement(new SyntaxNode[]
                         {
                            CreateProxyVaraibleDeclaration(gen, nameTable, isAsync),
-                           CreateCancellableProxyInvocationStatement(context, nameTable, sourceMethod)
+                           CreateCancellableProxyInvocationStatement(semanticModel.Compilation, gen, nameTable, sourceMethod)
 
                         }, new SyntaxNode[]
                         {
@@ -257,15 +262,15 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
          #region Internal Methods
 
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateGetProxyMethod(context, proxyInterface, nameTable, false).AddLeadingTrivia(gen.CreateRegionTrivia("Private Methods")).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateGetProxyMethod(context, proxyInterface, nameTable, true).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateStaticCloseProxyMethod(context, nameTable, false).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateStaticCloseProxyMethod(context, nameTable, true).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateCloseProxyMethod(context, nameTable, false).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateCloseProxyMethod(context, nameTable, true).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateEnsureProxyMethod(context, nameTable, false).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateEnsureProxyMethod(context, nameTable, true).AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia()));
-         targetClass = gen.AddMembers(targetClass, CreateDisposeMethods(context, nameTable, suppressWarningComments));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateGetProxyMethod(semanticModel.Compilation, gen, proxyInterface, nameTable, false).AddLeadingTrivia(gen.CreateRegionTrivia("Private Methods")).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateGetProxyMethod(semanticModel.Compilation, gen, proxyInterface, nameTable, true).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateStaticCloseProxyMethod(semanticModel.Compilation, gen, nameTable, false).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateStaticCloseProxyMethod(semanticModel.Compilation, gen, nameTable, true).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateCloseProxyMethod(semanticModel.Compilation, gen, nameTable, false).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateCloseProxyMethod(semanticModel.Compilation, gen, nameTable, true).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateEnsureProxyMethod(semanticModel.Compilation, gen, nameTable, false).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, gen.AddWarningCommentIf(!suppressWarningComments, CreateEnsureProxyMethod(semanticModel.Compilation, gen, nameTable, true).AddTrailingTrivia(gen.CreateEndRegionTrivia()).AddNewLineTrivia()));
+         targetClass = gen.AddMembers(targetClass, CreateDisposeMethods(semanticModel.Compilation, gen, nameTable, suppressWarningComments));
 
          if (withInternalProxy)
          {
@@ -275,16 +280,14 @@ namespace Alphaleonis.WcfClientProxyGenerator
          #endregion
 
 
-         targetClass = AddGeneratedCodeAttribute(context.Generator, targetClass);
+         targetClass = AddGeneratedCodeAttribute(gen, targetClass);
          return (ClassDeclarationSyntax)targetClass;
       }
 
-      private SyntaxNode CreateProxyInvocationStatement(CSharpRoslynCodeGenerationContext context, GenerationNameTable nameTable, IMethodSymbol sourceMethod)
+      private SyntaxNode CreateProxyInvocationStatement(Compilation compilation, SyntaxGenerator g, GenerationNameTable nameTable, IMethodSymbol sourceMethod)
       {
-         bool isAsync = ReturnsTask(context, sourceMethod);
-         bool isVoid = IsVoid(context, sourceMethod);
-
-         SyntaxGenerator g = context.Generator;
+         bool isAsync = ReturnsTask(compilation, sourceMethod);
+         bool isVoid = IsVoid(compilation, sourceMethod);
 
          // proxy.Method(arg1, arg2, ...);
          SyntaxNode invocation = g.InvocationExpression(
@@ -358,10 +361,9 @@ namespace Alphaleonis.WcfClientProxyGenerator
          }
       }
 
-      private SyntaxNode CreateCancellableProxyInvocationStatement(CSharpRoslynCodeGenerationContext context, GenerationNameTable nameTable, IMethodSymbol sourceMethod)
+      private SyntaxNode CreateCancellableProxyInvocationStatement(Compilation compilation, SyntaxGenerator g, GenerationNameTable nameTable, IMethodSymbol sourceMethod)
       {
          //using (cancellationToken.Register(s => CloseProxy((System.ServiceModel.ICommunicationObject)s, true), proxy, false))
-         SyntaxGenerator g = context.Generator;
          string stateVariableName = GetUniqueParameterName("s", sourceMethod);
          return g.UsingStatement(
             g.InvocationExpression(
@@ -374,7 +376,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                   g.InvocationExpression(
                      g.IdentifierName(nameTable[MemberNames.CloseProxyMethod]),
                      g.CastExpression(
-                        RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject"),
+                        compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject"),
                         g.IdentifierName(stateVariableName)
                      ),
                      g.TrueLiteralExpression()
@@ -385,7 +387,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
             ),
             new SyntaxNode[]
             {
-               CreateProxyInvocationStatement(context, nameTable, sourceMethod)
+               CreateProxyInvocationStatement(compilation, g, nameTable, sourceMethod)
             }
          );
       }
@@ -407,9 +409,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
          return GetUniqueName(desiredName, method.Parameters.Select(p => p.Name).ToArray());
       }
 
-      private SyntaxNode CreateGetProxyMethod(CSharpRoslynCodeGenerationContext context, INamedTypeSymbol proxyInterface, GenerationNameTable nameTable, bool isAsync)
+      private SyntaxNode CreateGetProxyMethod(Compilation compilation, SyntaxGenerator g, INamedTypeSymbol proxyInterface, GenerationNameTable nameTable, bool isAsync)
       {
-         SyntaxGenerator g = context.Generator;
          //private IProxy GetProxy()
          //{
          //   EnsureProxy();
@@ -417,7 +418,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          //}
          return g.MethodDeclaration(
             isAsync ? nameTable[MemberNames.GetProxyAsyncMethod] : nameTable[MemberNames.GetProxyMethod],
-            returnType: g.TypeExpression(isAsync ? GetGenericTaskType(context).Construct(proxyInterface) : proxyInterface),
+            returnType: g.TypeExpression(isAsync ? compilation.RequireType(typeof(Task<>)).Construct(proxyInterface) : proxyInterface),
             accessibility: Accessibility.Private,
             modifiers: isAsync ? DeclarationModifiers.Async : DeclarationModifiers.None,
             statements: new SyntaxNode[]
@@ -442,7 +443,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          );
       }
 
-      private SyntaxNode CreateStaticCloseProxyMethod(CSharpRoslynCodeGenerationContext context, GenerationNameTable nameTable, bool asAsync)
+      private SyntaxNode CreateStaticCloseProxyMethod(Compilation compilation, SyntaxGenerator g, GenerationNameTable nameTable, bool asAsync)
       {
          //private static void CloseProxy(System.ServiceModel.ICommunicationObject proxy, bool alwaysAbort)
          //{
@@ -474,15 +475,15 @@ namespace Alphaleonis.WcfClientProxyGenerator
          //      throw;
          //   }
          //}                  
-         SyntaxGenerator g = context.Generator;
+         
          return g.MethodDeclaration(
             asAsync ? nameTable[MemberNames.CloseProxyAsyncMethod] : nameTable[MemberNames.CloseProxyMethod],
             accessibility: Accessibility.Private,
-            returnType: asAsync ? g.TypeExpression(GetVoidTaskType(context)) : null,
+            returnType: asAsync ? g.TypeExpression(compilation.RequireType<Task>()) : null,
             modifiers: (asAsync ? DeclarationModifiers.Async : DeclarationModifiers.None) | DeclarationModifiers.Static,
             parameters: new SyntaxNode[]
             {
-               g.ParameterDeclaration("proxy", g.TypeExpression(RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject"))),
+               g.ParameterDeclaration("proxy", g.TypeExpression(compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject"))),
                g.ParameterDeclaration("alwaysAbort", g.TypeExpression(SpecialType.System_Boolean))
 
             },
@@ -564,7 +565,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                   new SyntaxNode[]
                   {
                      // catch (System.ServiceModel.CommunicationException)
-                     g.CatchClause(RequireTypeSymbol(context, "System.ServiceModel.CommunicationException"),
+                     g.CatchClause(compilation.RequireTypeByMetadataName("System.ServiceModel.CommunicationException"),
                         new SyntaxNode[]
                         {
                            // proxy.Abort();
@@ -578,7 +579,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                            )
                         }
                      ),
-                     g.CatchClause(RequireTypeSymbol(context, "System.TimeoutException"),
+                     g.CatchClause(compilation.RequireTypeByMetadataName("System.TimeoutException"),
                         new SyntaxNode[]
                         {
                            // proxy.Abort();
@@ -614,13 +615,12 @@ namespace Alphaleonis.WcfClientProxyGenerator
          );
       }
 
-      private SyntaxNode CreateCloseProxyMethod(CSharpRoslynCodeGenerationContext context, GenerationNameTable nameTable, bool asAsync)
+      private SyntaxNode CreateCloseProxyMethod(Compilation compilation, SyntaxGenerator g, GenerationNameTable nameTable, bool asAsync)
       {
-         SyntaxGenerator g = context.Generator;
          return
             g.MethodDeclaration(
                asAsync ? nameTable[MemberNames.CloseProxyAsyncMethod] : nameTable[MemberNames.CloseProxyMethod],
-               returnType: asAsync ? g.TypeExpression(GetVoidTaskType(context)) : null,
+               returnType: asAsync ? g.TypeExpression(compilation.RequireType<Task>()) : null,
                parameters: new SyntaxNode[] { g.ParameterDeclaration("alwaysAbort", g.TypeExpression(SpecialType.System_Boolean)) },
                modifiers: asAsync ? DeclarationModifiers.Async : DeclarationModifiers.None,
                accessibility: Accessibility.Private,
@@ -640,7 +640,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                                  g.ThisExpression(),
                                  nameTable[MemberNames.CachedProxyField]
                               ),
-                              RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject")
+                              compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject")
                            )
                         ),
                         g.TryFinallyStatement(
@@ -671,10 +671,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
             );
       }
 
-      private SyntaxNode CreateEnsureProxyMethod(CSharpRoslynCodeGenerationContext context, GenerationNameTable nameTable, bool asAsync)
+      private SyntaxNode CreateEnsureProxyMethod(Compilation compilation, SyntaxGenerator g, GenerationNameTable nameTable, bool asAsync)
       {
-         SyntaxGenerator g = context.Generator;
-
          /*
             private async System.Threading.Tasks.Task EnsureProxyAsync()
             {
@@ -696,7 +694,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          return
             g.MethodDeclaration(
                asAsync ? nameTable[MemberNames.EnsureProxyAsyncMethod] : nameTable[MemberNames.EnsureProxyMethod],
-               returnType: asAsync ? g.TypeExpression(GetVoidTaskType(context)) : null,
+               returnType: asAsync ? g.TypeExpression(compilation.RequireType<Task>()) : null,
                accessibility: Accessibility.Private,
                modifiers: asAsync ? DeclarationModifiers.Async : DeclarationModifiers.None,
                statements: new SyntaxNode[]
@@ -719,7 +717,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                            g.ValueEqualsExpression(
                               g.MemberAccessExpression(
                                  g.CastExpression(
-                                    RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject"),
+                                    compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject"),
                                     g.MemberAccessExpression(
                                        g.ThisExpression(),
                                        nameTable[MemberNames.CachedProxyField]
@@ -733,7 +731,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                            g.ValueEqualsExpression(
                               g.MemberAccessExpression(
                                  g.CastExpression(
-                                    RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject"),
+                                    compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject"),
                                     g.MemberAccessExpression(
                                        g.ThisExpression(),
                                        nameTable[MemberNames.CachedProxyField]
@@ -787,14 +785,14 @@ namespace Alphaleonis.WcfClientProxyGenerator
                                        g.DottedName("System.Threading.Tasks.Task.Factory.FromAsync"),
                                        g.MemberAccessExpression(
                                           g.CastExpression(
-                                              RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject"),
+                                              compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject"),
                                               g.IdentifierName("proxy")
                                           ),
                                           "BeginOpen"
                                        ),
                                        g.MemberAccessExpression(
                                           g.CastExpression(
-                                              RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject"),
+                                              compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject"),
                                               g.IdentifierName("proxy")
                                           ),
                                           "EndOpen"
@@ -806,7 +804,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                            g.InvocationExpression(
                               g.MemberAccessExpression(
                                  g.CastExpression(
-                                    RequireTypeSymbol(context, "System.ServiceModel.ICommunicationObject"),
+                                    compilation.RequireTypeByMetadataName("System.ServiceModel.ICommunicationObject"),
                                     g.IdentifierName("proxy")
                                  ),
                                  "Open"
@@ -827,10 +825,8 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
       }
 
-      private IEnumerable<SyntaxNode> CreateDisposeMethods(CSharpRoslynCodeGenerationContext context, GenerationNameTable nameTable, bool suppressWarningComments)
+      private IEnumerable<SyntaxNode> CreateDisposeMethods(Compilation compilation, SyntaxGenerator g, GenerationNameTable nameTable, bool suppressWarningComments)
       {
-         SyntaxGenerator g = context.Generator;
-
          yield return g.AddWarningCommentIf(!suppressWarningComments,
          g.MethodDeclaration(
             "Dispose",
@@ -846,7 +842,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
                ),
                g.InvocationExpression(
                   g.MemberAccessExpression(
-                     g.TypeExpression(RequireTypeSymbol(context, "System.GC")),
+                     g.TypeExpression(compilation.RequireTypeByMetadataName("System.GC")),
                      "SuppressFinalize"
                   ),
                   g.ThisExpression()
