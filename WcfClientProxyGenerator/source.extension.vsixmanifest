@@ -2,8 +2,8 @@
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
    <Metadata>
       <Identity Id="WcfClientProxyGenerator.Alphaleonis.e83c33b1-0d30-42a9-9532-81a4567e40bd" Version="0.5" Language="en-US" Publisher="Peter Palotas" />
-      <DisplayName>WcfClientProxyGenerator</DisplayName>
-      <Description xml:space="preserve">Work In Progress</Description>
+      <DisplayName>Alphaleonis WCF Client Proxy Generator (C#)</DisplayName>
+      <Description xml:space="preserve">The WCF Client Proxy Generator is a Visual Studio Extension providing a Custom Tool that can be used for generating WCF Client proxy interfaces and classes based on service contract interfaces defined in code in the same solution.</Description>
       <MoreInfo>https://github.com/alphaleonis/WcfClientProxyGenerator</MoreInfo>
       <License>LICENSE.TXT</License>
       <Icon>Resources\WcfClientProxyGenerator.ico</Icon>
