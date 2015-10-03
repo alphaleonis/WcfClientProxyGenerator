@@ -42,7 +42,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          public const string ProxyClass = "ProxyChannel";
       }
 
-      public async Task<ClassDeclarationSyntax> GenerateClientClass(SemanticModel semanticModel, SyntaxGenerator gen, INamedTypeSymbol proxyInterface, string name, Accessibility accessibility, bool includeCancellableAsyncMethods, bool suppressWarningComments, MemberAccessibility constructorAccessibility, bool withInternalProxy)
+      public Task<ClassDeclarationSyntax> GenerateClientClass(SemanticModel semanticModel, SyntaxGenerator gen, INamedTypeSymbol proxyInterface, string name, Accessibility accessibility, bool includeCancellableAsyncMethods, bool suppressWarningComments, MemberAccessibility constructorAccessibility, bool withInternalProxy)
       {
          if (name == null)
          {
@@ -281,7 +281,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
 
          targetClass = AddGeneratedCodeAttribute(gen, targetClass);
-         return (ClassDeclarationSyntax)targetClass;
+         return Task.FromResult((ClassDeclarationSyntax)targetClass);
       }
 
       private SyntaxNode CreateProxyInvocationStatement(Compilation compilation, SyntaxGenerator g, GenerationNameTable nameTable, IMethodSymbol sourceMethod)

@@ -9,6 +9,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AlphaVSX", "AlphaVSX\AlphaV
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Attributes", "Attributes", "{2D6668C3-30D0-47F1-9A45-8DD4AE3960BC}"
 	ProjectSection(SolutionItems) = preProject
+		Attributes\WcfClientCodeGenerator.Attributes.nuspec = Attributes\WcfClientCodeGenerator.Attributes.nuspec
 		Attributes\WcfClientProxyGeneratorAttributes.cs = Attributes\WcfClientProxyGeneratorAttributes.cs
 	EndProjectSection
 EndProject

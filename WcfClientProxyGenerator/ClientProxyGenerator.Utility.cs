@@ -162,7 +162,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
          }
       }
 
-      private ImmutableArray<OperationContractMethodInfo> GetOperationContractMethods(SemanticModel semanticModel, INamedTypeSymbol serviceInterface)
+      private ImmutableArray<OperationContractMethodInfo> GetOperationContractMethodInfos(SemanticModel semanticModel, INamedTypeSymbol serviceInterface)
       {
          ITypeSymbol operationContractAttributeType = semanticModel.Compilation.RequireTypeByMetadataName("System.ServiceModel.OperationContractAttribute");
 
@@ -180,7 +180,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
       {
          ImmutableList<MethodDeclarationSyntax> methods = ImmutableList<MethodDeclarationSyntax>.Empty;
 
-         var sourceMethods = GetOperationContractMethods(semanticModel, serviceInterface);
+         var sourceMethods = GetOperationContractMethodInfos(semanticModel, serviceInterface);
 
          foreach (var methodInfo in sourceMethods)
          {

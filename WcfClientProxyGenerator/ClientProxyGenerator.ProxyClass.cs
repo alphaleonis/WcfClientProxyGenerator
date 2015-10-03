@@ -76,7 +76,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
             targetClass = generator.AddMembers(targetClass, targetCtor.AddNewLineTrivia());
          }
 
-         foreach (IMethodSymbol sourceMethod in GetOperationContractMethods(semanticModel, sourceProxyInterface))
+         foreach (IMethodSymbol sourceMethod in GetOperationContractMethods(semanticModel.Compilation, sourceProxyInterface))
          {
             SyntaxNode targetMethod = generator.MethodDeclaration(sourceMethod);
 
