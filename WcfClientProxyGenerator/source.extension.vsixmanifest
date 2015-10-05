@@ -7,6 +7,7 @@
       <MoreInfo>https://github.com/alphaleonis/WcfClientProxyGenerator</MoreInfo>
       <License>LICENSE.TXT</License>
       <Icon>Resources\WcfClientProxyGenerator.ico</Icon>
+      <Tags>WCF</Tags>
    </Metadata>
    <Installation>
       <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[14.0]" />
