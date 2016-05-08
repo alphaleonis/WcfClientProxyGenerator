@@ -30,6 +30,7 @@ namespace Alphaleonis.WcfClientProxyGenerator
             var taskType = semanticModel.Compilation.RequireTypeByMetadataName(typeof(Task).FullName);
             var genericTaskType = semanticModel.Compilation.RequireTypeByMetadataName(typeof(Task<>).FullName);
             var operationContractAttributeType = semanticModel.Compilation.RequireTypeByMetadataName("System.ServiceModel.OperationContractAttribute");
+            var faultContractAttributeType = semanticModel.Compilation.RequireTypeByMetadataName("System.ServiceModel.FaultContractAttribute");
 
             var operationContractAttribute = method.GetAttribute(operationContractAttributeType);
             if (operationContractAttribute == null)
@@ -37,7 +38,13 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
             OperationContractAttribute = new ModifiedOperationContractAttributeData(operationContractAttribute);
 
-            AdditionalAttributes = method.GetAttributes().Where(attr => attr.AttributeClass.Equals(operationContractAttributeType) == false).ToImmutableArray();
+            FaultContractAttributes = method.GetAttributes().Where(attr => attr.AttributeClass.Equals(faultContractAttributeType)).ToImmutableArray();
+
+            AdditionalAttributes = method.GetAttributes()
+               .Where(
+                  attr => !attr.AttributeClass.Equals(operationContractAttributeType) &&
+                          !attr.AttributeClass.Equals(faultContractAttributeType)
+               ).ToImmutableArray();
 
             IsAsync = method.ReturnType.Equals(taskType) || method.ReturnType.OriginalDefinition.Equals(genericTaskType.OriginalDefinition);
 
@@ -85,13 +92,15 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
          public ImmutableArray<AttributeData> AdditionalAttributes { get; }
 
+         public ImmutableArray<AttributeData> FaultContractAttributes { get; }
+
          public ImmutableArray<IParameterSymbol> Parameters { get { return Method.Parameters; } }
 
          public IEnumerable<AttributeData> AllAttributes
          {
             get
             {
-               return AdditionalAttributes.Concat(new[] { OperationContractAttribute });                              
+               return AdditionalAttributes.Concat(FaultContractAttributes).Concat(new[] { OperationContractAttribute });                              
             }
          }
 
@@ -182,10 +191,10 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
          var sourceMethods = GetOperationContractMethodInfos(semanticModel, serviceInterface);
 
-         foreach (var methodInfo in sourceMethods)
-         {
-            // Emit non-async version of method
-            if (!(methodInfo.IsAsync && sourceMethods.Any(m => m.ContractMacthes(methodInfo) && m.IsAsync == false)))
+         foreach (var methodInfo in sourceMethods.OrderBy(m => m.ContractMethodName).ThenBy(m => m.IsAsync))
+         {            
+            // Emit non-async version of method 
+            if (!methodInfo.IsAsync || !sourceMethods.Any(m => m.ContractMacthes(methodInfo) && !m.IsAsync))
             {
                SyntaxNode targetMethod = gen.MethodDeclaration(methodInfo.Method);
                targetMethod = gen.WithType(targetMethod, gen.TypeExpression(methodInfo.ContractReturnType));
@@ -193,8 +202,10 @@ namespace Alphaleonis.WcfClientProxyGenerator
 
                if (includeAttributes)
                {
-                  targetMethod = gen.AddAttributes(targetMethod, methodInfo.AllAttributes.Select(a => gen.Attribute(a)));                  
+                  var extraFaultContractAttributes = sourceMethods.FirstOrDefault(m => m.ContractMacthes(methodInfo) && m.IsAsync != methodInfo.IsAsync)?.FaultContractAttributes ?? Enumerable.Empty<AttributeData>();
+                  targetMethod = gen.AddAttributes(targetMethod, methodInfo.AllAttributes.Concat(extraFaultContractAttributes).Select(a => gen.Attribute(a)));
                }
+
                targetMethod = targetMethod.AddNewLineTrivia().AddNewLineTrivia();
                methods = methods.Add((MethodDeclarationSyntax)targetMethod);
             }
